@@ -1,0 +1,7 @@
+{
+  "name": "com.local_video_upscaler",
+  "description": "Local companion for Video Upscaler Local",
+  "path": "REPLACE_WITH_ABSOLUTE_PATH_TO_video_upscaler_host.py",
+  "type": "stdio",
+  "allowed_origins": ["REPLACE_WITH_CHROME_OR_EDGE_EXTENSION_ID"]
+}

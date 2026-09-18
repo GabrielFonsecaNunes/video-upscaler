@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Video Upscaler Local",
+  "version": "0.1.1",
+  "description": "Adds a local 2x upscaling option to videos on the web.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "video-upscaler-local@example.com"
+    }
+  },
+  "permissions": ["nativeMessaging"],
+  "host_permissions": ["<all_urls>", "http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ]
+}

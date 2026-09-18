@@ -1,0 +1,18 @@
+{
+  "name": "video-upscaler",
+  "version": "0.1.0",
+  "description": "Local, cross-platform video upscaling with Real-ESRGAN",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Video Upscaler",
+    "shortDescription": "Upscale local videos without cloud costs.",
+    "longDescription": "Improves local videos on macOS, Windows, and Linux with FFmpeg and Real-ESRGAN. Source files remain untouched.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": ["local video processing", "cross-platform", "preview before full render"],
+    "defaultPrompt": "Upscale a local video 2x. First inspect the file and create a 10-second preview when appropriate."
+  }
+}

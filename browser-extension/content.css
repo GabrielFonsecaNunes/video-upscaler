@@ -1,0 +1,19 @@
+.vu-action {
+  position: absolute;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  color: #fff;
+  background: rgba(18, 18, 23, .94);
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 8px;
+  box-shadow: 0 3px 14px rgba(0,0,0,.35);
+  font: 13px/1.2 system-ui, sans-serif;
+}
+.vu-action button { border: 0; border-radius: 5px; background: #7c3aed; color: #fff; padding: 6px 8px; cursor: pointer; }
+.vu-action button:hover { background: #6d28d9; }
+.vu-action button:disabled { opacity: .65; cursor: wait; }
+.vu-result-video { display: block; }
+.vu-result-link { color: #c4b5fd; text-decoration: underline; }
