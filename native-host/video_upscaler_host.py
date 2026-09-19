@@ -11,6 +11,7 @@ import socket
 import struct
 import subprocess
 import sys
+import shutil
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
@@ -83,13 +84,27 @@ def safe_stem(title: str) -> str:
     return re.sub(r"[^A-Za-z0-9._ -]+", "_", title).strip(" ._")[:80] or "upscaled-video"
 
 
+def unique_output(directory: Path, stem: str, suffix: str) -> Path:
+    candidate = directory / f"{stem}-{suffix}.mp4"
+    if not candidate.exists():
+        return candidate
+    for number in range(2, 1000):
+        candidate = directory / f"{stem}-{suffix}-{number}.mp4"
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError("Não foi possível criar um nome de saída disponível")
+
+
 def download(message: dict, target: Path) -> Path:
     url = message["videoUrl"]
     page = message.get("pageUrl", "")
     if "youtube.com" in page or "youtu.be" in page:
+        yt_dlp = shutil.which("yt-dlp")
+        if not yt_dlp:
+            raise RuntimeError("yt-dlp não encontrado no PATH")
         subprocess.run(
-            [sys.executable, "-m", "yt_dlp", "--no-playlist", "-f",
-             "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]",
+            [yt_dlp, "--no-playlist", "-f",
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]",
              "--merge-output-format", "mp4", "-o", str(target), page],
             check=True, stdout=sys.stderr,
         )
@@ -113,13 +128,14 @@ def main() -> None:
     stem = safe_stem(message.get("title", "upscaled-video"))
     source = OUTPUT / f"{stem}-source.mp4"
     suffix = "preview" if message.get("limitSeconds") else "2x"
-    destination = OUTPUT / f"{stem}-{suffix}.mp4"
+    destination = unique_output(OUTPUT, stem, suffix)
     try:
         download(message, source)
         use_mlx = platform.system() == "Darwin" and platform.machine() == "arm64" and MLX_PYTHON.is_file()
         command = [str(MLX_PYTHON) if use_mlx else sys.executable, str(MLX_UPSCALE if use_mlx else UPSCALE), str(source), str(destination), "--scale", str(message.get("scale", 2))]
         if message.get("limitSeconds"):
             command += ["--limit-seconds", str(message["limitSeconds"])]
+            command += ["--preview-fps", "30"]
         subprocess.run(command, check=True, stdout=sys.stderr)
         send_message({"output": output_url(destination), "path": str(destination)})
     except Exception as error:

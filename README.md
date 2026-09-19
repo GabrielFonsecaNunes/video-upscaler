@@ -15,7 +15,27 @@ The `browser-extension/` folder is a Manifest V3 extension for Chrome, Edge, and
 
 The extension never sends frames to a paid web service. It uses the included `native-host/` companion to download the video only after the user clicks a button, then processes it on the same computer. Results are saved in `Videos/Video Upscaler`.
 
-On Apple Silicon, the companion automatically uses the MLX backend in `scripts/video_upscale_mlx.py`. This is the native Metal path and avoids Vulkan. It currently supports the economical 2× profile.
+On Apple Silicon, the companion automatically uses the MLX backend in `scripts/video_upscale_mlx.py`. This is the native Metal path and avoids Vulkan. It currently supports the economical 2× profile. Frames are decoded and encoded through FFmpeg pipes on demand, so the MLX path does not create a temporary PNG sequence.
+
+## Hybrid streaming branch
+
+The `streaming-hybrid` branch adds a portable C++ streaming engine under
+`streaming-engine/`. It uses a framed stdin/stdout protocol so a JavaScript or
+Python coordinator can send one RGB frame at a time and receive its processed
+2× frame without temporary files. The current engine uses nearest-neighbor
+scaling as a transport smoke test; the neural backend is intentionally isolated
+behind the same protocol for later ONNX Runtime, NCNN, Vulkan, or WebGPU
+integration.
+
+Build it with CMake when available, or compile `streaming-engine/main.cpp`
+directly with a C++17 compiler. The Python adapter reads raw RGB frames from
+stdin and writes processed RGB frames to stdout:
+
+```sh
+clang++ -std=c++17 streaming-engine/main.cpp -o /tmp/video-upscaler-engine
+python3 streaming-engine/stream_frames.py /tmp/video-upscaler-engine \
+  --width 640 --height 360 --frames 30 < frames.rgb > frames-2x.rgb
+```
 
 ### Install for development
 

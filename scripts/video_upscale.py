@@ -59,6 +59,10 @@ def frame_rate(ffprobe: str, source: Path) -> str:
     return value if value != "0/0" else "30"
 
 
+def preview_rate(rate: str, target: int) -> tuple[str, bool]:
+    return (str(target), True)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, nargs="?", help="Source video")
@@ -66,6 +70,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scale", choices=(2, 3, 4), type=int, default=2)
     parser.add_argument("--model", default="realesrgan-x4plus")
     parser.add_argument("--limit-seconds", type=float, help="Process only an initial preview")
+    parser.add_argument("--preview-fps", type=int)
     parser.add_argument("--keep-frames", action="store_true")
     parser.add_argument("--check", action="store_true")
     return parser.parse_args()
@@ -98,6 +103,7 @@ def main() -> int:
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     rate = frame_rate(ffprobe, source)
+    output_rate, sample_to_30 = preview_rate(rate, args.preview_fps) if args.preview_fps else (rate, False)
     work = Path(tempfile.mkdtemp(prefix="video-upscaler-"))
     frames, enlarged = work / "frames", work / "enlarged"
     frames.mkdir(); enlarged.mkdir()
@@ -105,6 +111,8 @@ def main() -> int:
         extract = [ffmpeg, "-hide_banner", "-y", "-i", str(source)]
         if args.limit_seconds:
             extract += ["-t", str(args.limit_seconds)]
+        if sample_to_30:
+            extract += ["-vf", "fps=30"]
         run(extract + ["-map", "0:v:0", "-fps_mode", "passthrough", str(frames / "frame_%08d.png")])
         model_dir = Path(realesrgan).resolve().parent / "models"
         enhance = [realesrgan, "-i", str(frames), "-o", str(enlarged), "-n", args.model,
@@ -112,7 +120,7 @@ def main() -> int:
         if model_dir.is_dir():
             enhance += ["-m", str(model_dir)]
         run(enhance)
-        run([ffmpeg, "-hide_banner", "-y", "-framerate", rate, "-i",
+        run([ffmpeg, "-hide_banner", "-y", "-framerate", output_rate, "-i",
              str(enlarged / "frame_%08d.png"), "-i", str(source), "-map", "0:v:0",
              "-map", "1:a?", "-c:v", "libx264", "-crf", "17", "-preset", "medium",
              "-c:a", "copy", "-shortest", str(destination)])

@@ -26,7 +26,7 @@ async function processVideo(video, isPreview) {
     videoUrl: selectedUrl(video),
     title: document.title,
     scale: 2,
-    limitSeconds: isPreview ? 10 : null
+    limitSeconds: isPreview ? 5 : null
   });
   if (!reply?.ok || !reply.result?.output) return false;
   return replaceVideoSource(video, reply.result.output);
@@ -114,7 +114,7 @@ function attach(video) {
         videoUrl: selectedUrl(video),
         title: document.title,
         scale: 2,
-        limitSeconds: isPreview ? 10 : null
+        limitSeconds: isPreview ? 5 : null
       });
       if (reply?.ok) {
         const output = reply.result?.output;
