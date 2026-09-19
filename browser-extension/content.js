@@ -36,6 +36,7 @@ async function startWebGPU(video) {
   if (!globalThis.VideoUpscalerWebGPU) throw new Error("WebGPU não carregado");
   const upscaler = new globalThis.VideoUpscalerWebGPU(video);
   await upscaler.start();
+  if (!upscaler.rendered) throw new Error("Nenhum frame foi renderizado");
   video.dataset.vuWebgpu = "true";
   return true;
 }
@@ -127,6 +128,10 @@ function attach(video) {
           button.textContent = "WebGPU ativo";
         } catch (error) {
           button.textContent = "WebGPU indisponível";
+          const detail = document.createElement("small");
+          detail.textContent = error instanceof Error ? error.message : String(error);
+          detail.className = "vu-error";
+          control.append(detail);
         }
         return;
       }

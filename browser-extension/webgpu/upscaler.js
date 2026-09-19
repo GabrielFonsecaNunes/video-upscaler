@@ -49,18 +49,29 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
     }
 
     async initialize() {
+      if (!window.isSecureContext) throw new Error("WebGPU exige contexto seguro");
       if (!navigator.gpu) throw new Error("WebGPU não está disponível neste navegador");
       const adapter = await navigator.gpu.requestAdapter();
       if (!adapter) throw new Error("GPU não encontrada");
       this.device = await adapter.requestDevice();
+      this.device.lost.then((info) => {
+        this.running = false;
+        this.video.style.visibility = "";
+        this.canvas.dataset.error = `GPU perdida: ${info.message || info.reason}`;
+      });
       this.context = this.canvas.getContext("webgpu");
+      if (!this.context) throw new Error("Canvas WebGPU indisponível");
       this.format = navigator.gpu.getPreferredCanvasFormat();
       this.context.configure({ device: this.device, format: this.format, alphaMode: "opaque" });
+      const module = this.device.createShaderModule({ code: shader });
+      const compilation = await module.getCompilationInfo();
+      const error = compilation.messages.find((message) => message.type === "error");
+      if (error) throw new Error(`Shader WGSL: ${error.message}`);
       this.pipeline = this.device.createRenderPipeline({
         layout: "auto",
-        vertex: { module: this.device.createShaderModule({ code: shader }), entryPoint: "vertex" },
+        vertex: { module, entryPoint: "vertex" },
         fragment: {
-          module: this.device.createShaderModule({ code: shader }),
+          module,
           entryPoint: "fragment",
           targets: [{ format: this.format }],
         },
@@ -91,10 +102,16 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
       this.resize();
       (document.body || document.documentElement).append(this.canvas);
       this.running = true;
+      this.firstFrame = new Promise((resolve, reject) => {
+        this.resolveFirstFrame = resolve;
+        this.rejectFirstFrame = reject;
+        setTimeout(() => reject(new Error("WebGPU não recebeu um frame em 5 segundos")), 5000);
+      });
       this.frame();
       this.resizeObserver = new ResizeObserver(() => this.resize());
       this.resizeObserver.observe(this.video);
       window.addEventListener("scroll", this.resize, { passive: true });
+      await this.firstFrame;
       return true;
     }
 
@@ -143,10 +160,12 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
         if (!this.rendered) {
           this.rendered = true;
           this.video.style.visibility = "hidden";
+          this.resolveFirstFrame?.();
         }
         } catch (error) {
           this.canvas.dataset.error = error instanceof Error ? error.message : String(error);
           this.video.style.visibility = "";
+          this.rejectFirstFrame?.(error);
         }
       }
       requestAnimationFrame(() => this.frame());

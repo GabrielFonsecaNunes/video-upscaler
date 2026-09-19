@@ -18,3 +18,4 @@
 .vu-result-video { display: block; }
 .vu-result-link { color: #c4b5fd; text-decoration: underline; }
 .vu-webgpu-canvas { display: block; }
+.vu-error { color: #fca5a5; max-width: 260px; }
