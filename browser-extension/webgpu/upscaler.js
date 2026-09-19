@@ -32,7 +32,8 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
     textureSample(source, filtering, input.uv + vec2f(0.0, pixel.y)) +
     textureSample(source, filtering, input.uv - vec2f(0.0, pixel.y))
   ) * 0.25;
-  return vec4f(clamp(center + (center - blur) * 0.18, vec3f(0.0), vec3f(1.0)), 1.0);
+  let sharpened = center.rgb + (center.rgb - blur.rgb) * 0.18;
+  return vec4f(clamp(sharpened, vec3f(0.0), vec3f(1.0)), center.a);
 }
 `;
 
