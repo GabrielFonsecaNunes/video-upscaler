@@ -11,7 +11,7 @@ An offline Codex plugin for improving local videos on macOS, Windows, and Linux.
 
 ## Browser extension
 
-The `browser-extension/` folder is a Manifest V3 extension for Chrome, Edge, and recent Firefox versions. It detects `<video>` elements, including the YouTube player, and displays **Prévia 2×** and **2× completo** directly above the video.
+The `browser-extension/` folder is a Manifest V3 extension for Chrome, Edge, and recent Firefox versions. It detects `<video>` elements, including the YouTube player, and displays **WebGPU 2×** and **Salvar 30 s em 2×** directly above the video.
 
 The extension never sends frames to a paid web service. It uses the included `native-host/` companion to download the video only after the user clicks a button, then processes it on the same computer. Results are saved in `Videos/Video Upscaler`.
 
@@ -64,10 +64,14 @@ WebGPU texture and renders a 2x canvas overlay with linear filtering and a light
 sharpening shader. It keeps the original video as the audio and playback clock, so no
 download or Native Messaging host is required for this mode.
 
-This first browser path is a GPU shader baseline, not the full Real-ESRGAN neural model.
-The model can be added later by converting its weights and convolution layers to an
-ONNX/WebGPU or WGSL representation. WebGPU must be enabled in the browser, and DRM
-protected media cannot be read by the extension.
+The compact neural model runs internally at 4x and the browser output is presented at
+2x. This keeps the visible result at the requested 2x size while using the smaller
+SRVGG WebGPU runtime. WebGPU must be enabled in the browser, and DRM protected media
+cannot be read by the extension. To avoid saturating the browser, neural inference is
+limited to one frame in flight, limited to four frames per second, skipped for
+unchanged frames, and bounded to a 640-pixel longest dimension before the result is
+scaled to the 2x canvas. The neural path uses the SRVGG pixel-shuffle channel layout
+and waits for submitted GPU work before presenting each result.
 
 ### Exporting the neural model
 
@@ -83,3 +87,15 @@ This produces `manifest.json` and `weights.bin`. The loader uploads the tensors
 to WebGPU storage buffers. The convolution compute passes are the next integration
 step; the current renderer remains the lightweight shader baseline until those
 passes are wired into the frame loop.
+
+### Testing a local video
+
+To test video loading through the local HTTP server without YouTube or Native
+Messaging, run:
+
+```sh
+python native-host/video_upscaler_host.py --serve-file tools/onepiece_demo.mp4
+```
+
+Open the printed `http://127.0.0.1:...` URL in Chrome. The server is restricted
+to the selected file and is intended for local testing only.

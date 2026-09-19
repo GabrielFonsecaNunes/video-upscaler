@@ -7,6 +7,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import socket
 import struct
 import subprocess
@@ -36,7 +37,10 @@ def serve_output(directory: Path, token: str, port: int) -> None:
             prefix = f"/{token}/"
             if not path.startswith(prefix):
                 return str(directory / "__not_found__")
-            return str(directory / unquote(path[len(prefix):]))
+            requested = (directory / unquote(path[len(prefix):])).resolve()
+            if requested.parent != directory:
+                return str(directory / "__not_found__")
+            return str(requested)
 
     ThreadingHTTPServer(("127.0.0.1", port), TokenHandler).serve_forever()
 
@@ -82,12 +86,38 @@ def safe_stem(title: str) -> str:
     return re.sub(r"[^A-Za-z0-9._ -]+", "_", title).strip(" ._")[:80] or "upscaled-video"
 
 
+def output_directory() -> Path:
+    """Prefer Videos, but Chrome may not be granted access to that macOS folder."""
+    try:
+        OUTPUT.mkdir(parents=True, exist_ok=True)
+        return OUTPUT
+    except OSError:
+        fallback = Path.home() / "Downloads" / "Video Upscaler"
+        fallback.mkdir(parents=True, exist_ok=True)
+        return fallback
+
+
+def yt_dlp_command() -> list[str]:
+    """Find yt-dlp even when Chrome starts the native host with a minimal PATH."""
+    candidates = [
+        shutil.which("yt-dlp"),
+        "/opt/homebrew/bin/yt-dlp",
+        "/usr/local/bin/yt-dlp",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return [str(candidate)]
+    return [sys.executable, "-m", "yt_dlp"]
+
+
 def download(message: dict, target: Path) -> Path:
     url = message["videoUrl"]
     page = message.get("pageUrl", "")
     if "youtube.com" in page or "youtu.be" in page:
+        limit_seconds = message.get("limitSeconds")
+        sections = ["--download-sections", f"*0-{limit_seconds}"] if limit_seconds else []
         subprocess.run(
-            [sys.executable, "-m", "yt_dlp", "--no-playlist", "-f",
+            [*yt_dlp_command(), "--no-playlist", *sections, "-f",
              "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]",
              "--merge-output-format", "mp4", "-o", str(target), page],
             check=True, stdout=sys.stderr,
@@ -101,6 +131,17 @@ def download(message: dict, target: Path) -> Path:
 
 
 def main() -> None:
+    if len(sys.argv) == 3 and sys.argv[1] == "--serve-file":
+        path = Path(sys.argv[2]).expanduser().resolve()
+        if not path.is_file():
+            raise SystemExit(f"Arquivo não encontrado: {path}")
+        token = os.urandom(16).hex()
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        print(f"http://127.0.0.1:{port}/{token}/{quote(path.name)}", flush=True)
+        serve_output(path.parent, token, port)
+        return
     if len(sys.argv) == 5 and sys.argv[1] == "--serve":
         serve_output(Path(sys.argv[2]).resolve(), sys.argv[3], int(sys.argv[4]))
         return
@@ -108,17 +149,19 @@ def main() -> None:
     if not message or message.get("type") != "UPSCALE_VIDEO":
         send_message({"error": "Unsupported request"})
         return
-    OUTPUT.mkdir(parents=True, exist_ok=True)
-    stem = safe_stem(message.get("title", "upscaled-video"))
-    source = OUTPUT / f"{stem}-source.mp4"
-    suffix = "preview" if message.get("limitSeconds") else "2x"
-    destination = OUTPUT / f"{stem}-{suffix}.mp4"
     try:
+        output = output_directory()
+        stem = safe_stem(message.get("title", "upscaled-video"))
+        job_id = os.urandom(6).hex()
+        source = output / f"{stem}-{job_id}-source.mp4"
+        limit_seconds = message.get("limitSeconds")
+        suffix = f"{int(limit_seconds)}s" if limit_seconds else "2x"
+        destination = output / f"{stem}-{suffix}-{job_id}.mp4"
         download(message, source)
         use_mlx = platform.system() == "Darwin" and platform.machine() == "arm64" and MLX_PYTHON.is_file()
         command = [str(MLX_PYTHON) if use_mlx else sys.executable, str(MLX_UPSCALE if use_mlx else UPSCALE), str(source), str(destination), "--scale", str(message.get("scale", 2))]
-        if message.get("limitSeconds"):
-            command += ["--limit-seconds", str(message["limitSeconds"])]
+        if limit_seconds:
+            command += ["--limit-seconds", str(limit_seconds)]
         subprocess.run(command, check=True, stdout=sys.stderr)
         send_message({"output": output_url(destination), "path": str(destination)})
     except Exception as error:

@@ -74,6 +74,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var output: texture_storage_2d<rgba16float, write>;
 @group(0) @binding(2) var<uniform> params: vec4<u32>;
+@group(0) @binding(3) var<storage, read> original: array<f32>;
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   let width = params.x; let height = params.y; let channels = params.z;
@@ -81,8 +82,13 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
   if (x >= width * 4u || y >= height * 4u) { return; }
   let sx = x / 4u; let sy = y / 4u; let ox = x % 4u; let oy = y % 4u;
   let channel = oy * 4u + ox;
-  let base = (sy * width + sx) * channels + channel;
-  textureStore(output, vec2u(x, y), vec4f(input[base], input[base + 1u], input[base + 2u], 1.0));
+  let base = (sy * width + sx) * channels + channel * 3u;
+  let originalBase = (sy * width + sx) * 3u;
+  let rgb = clamp(
+    vec3f(input[base], input[base + 1u], input[base + 2u]) +
+      vec3f(original[originalBase], original[originalBase + 1u], original[originalBase + 2u]),
+    vec3f(0.0), vec3f(1.0));
+  textureStore(output, vec2u(x, y), vec4f(rgb, 1.0));
 }
 `;
 
@@ -94,8 +100,16 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
       this.canvas.className = "vu-webgpu-canvas";
       this.canvas.style.cssText = "position:fixed;z-index:2147483646;object-fit:contain;background:#000;pointer-events:none";
       this.running = false;
-      this.processing = false;
+      this.inFlight = 0;
+      this.frameSequence = 0;
+      this.lastDisplayedSequence = -1;
       this.rendered = false;
+      this.lastVideoTime = -1;
+      this.lastProcessAt = 0;
+      this.minFrameInterval = 250;
+      this.maxNeuralDimension = 640;
+      this.maxConcurrentFrames = 1;
+      this.neuralEnabled = true;
       this.ready = this.initialize();
     }
 
@@ -169,8 +183,8 @@ struct VertexOutput {
       const rect = this.video.getBoundingClientRect();
       const width = Math.max(1, Math.floor(this.video.videoWidth || rect.width));
       const height = Math.max(1, Math.floor(this.video.videoHeight || rect.height));
-      this.canvas.width = width * 4;
-      this.canvas.height = height * 4;
+      this.canvas.width = width * 2;
+      this.canvas.height = height * 2;
       this.canvas.style.top = `${rect.top}px`;
       this.canvas.style.left = `${rect.left}px`;
       this.canvas.style.width = `${rect.width}px`;
@@ -187,10 +201,15 @@ struct VertexOutput {
     }
 
     async neuralFrame(width, height) {
+      this.device.pushErrorScope("validation");
+      this.device.pushErrorScope("internal");
       const inputSize = width * height * 3 * 4;
       let input = this.device.createBuffer({ size: inputSize, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+      const originalInput = input;
+      const transientBuffers = [input];
       const external = this.device.importExternalTexture({ source: this.video });
       const convertParams = this.uniform(new Uint32Array([width, height]));
+      transientBuffers.push(convertParams);
       let bind = this.device.createBindGroup({
         layout: this.convertPipeline.getBindGroupLayout(0),
         entries: [
@@ -200,15 +219,14 @@ struct VertexOutput {
           { binding: 3, resource: this.sampler },
         ],
       });
-      let encoder = this.device.createCommandEncoder();
+      const encoder = this.device.createCommandEncoder();
       let pass = encoder.beginComputePass();
       pass.setPipeline(this.convertPipeline);
       pass.setBindGroup(0, bind);
       pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8));
       pass.end();
-      this.device.queue.submit([encoder.finish()]);
 
-      const convs = this.model.weightsFor("convs.");
+      const convs = this.model.weightsFor("convs.", ".weight");
       for (let i = 0; i < convs.length; i++) {
         const weight = this.model.tensor(`convs.${i}.weight`);
         const bias = this.model.tensor(`convs.${i}.bias`);
@@ -219,6 +237,7 @@ struct VertexOutput {
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
         });
         const params = this.uniform(new Uint32Array([width, height, inputChannels, outputChannels, i === convs.length - 1 ? 0 : 1]));
+        transientBuffers.push(output, params);
         const slope = i < convs.length - 1
           ? this.model.tensor(`acts.${i}.weight`).buffer
           : this.zeroSlope;
@@ -234,13 +253,11 @@ struct VertexOutput {
             { binding: 5, resource: { buffer: params } },
           ],
         });
-        encoder = this.device.createCommandEncoder();
         pass = encoder.beginComputePass();
         pass.setPipeline(this.convPipeline);
         pass.setBindGroup(0, bind);
         pass.dispatchWorkgroups(Math.ceil(width / 8), Math.ceil(height / 8), outputChannels);
         pass.end();
-        this.device.queue.submit([encoder.finish()]);
         input = output;
       }
       const outputTexture = this.device.createTexture({
@@ -255,16 +272,34 @@ struct VertexOutput {
           { binding: 0, resource: { buffer: input } },
           { binding: 1, resource: outputTexture.createView() },
           { binding: 2, resource: { buffer: shuffleParams } },
+          { binding: 3, resource: { buffer: originalInput } },
         ],
       });
-      encoder = this.device.createCommandEncoder();
+      transientBuffers.push(shuffleParams);
       pass = encoder.beginComputePass();
       pass.setPipeline(this.shufflePipeline);
       pass.setBindGroup(0, bind);
       pass.dispatchWorkgroups(Math.ceil(width * 4 / 8), Math.ceil(height * 4 / 8));
       pass.end();
       this.device.queue.submit([encoder.finish()]);
+      await this.device.queue.onSubmittedWorkDone();
+      transientBuffers.forEach((buffer) => buffer.destroy());
+      const internalError = await this.device.popErrorScope();
+      const validationError = await this.device.popErrorScope();
+      if (internalError || validationError) {
+        throw new Error(`WebGPU neural: ${(internalError || validationError).message}`);
+      }
       return outputTexture;
+    }
+
+    processingSize(width, height) {
+      const longest = Math.max(width, height);
+      if (longest <= this.maxNeuralDimension) return [width, height];
+      const scale = this.maxNeuralDimension / longest;
+      return [
+        Math.max(1, Math.floor(width * scale)),
+        Math.max(1, Math.floor(height * scale)),
+      ];
     }
 
     async start() {
@@ -283,6 +318,9 @@ struct VertexOutput {
         this.rejectFirstFrame = reject;
         setTimeout(() => reject(new Error("WebGPU não recebeu um frame em 5 segundos")), 5000);
       });
+      await this.renderOriginalFrame();
+      this.rendered = true;
+      this.resolveFirstFrame?.();
       this.frame();
       this.resizeObserver = new ResizeObserver(() => this.resize());
       this.resizeObserver.observe(this.video);
@@ -291,53 +329,108 @@ struct VertexOutput {
       return true;
     }
 
+    async renderOriginalFrame() {
+      const external = this.device.importExternalTexture({ source: this.video });
+      const bind = this.device.createBindGroup({
+        layout: this.pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: external },
+          { binding: 1, resource: this.sampler },
+        ],
+      });
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginRenderPass({
+        colorAttachments: [{
+          view: this.context.getCurrentTexture().createView(),
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: "clear",
+          storeOp: "store",
+        }],
+      });
+      pass.setPipeline(this.pipeline);
+      pass.setBindGroup(0, bind);
+      pass.draw(6);
+      pass.end();
+      this.device.queue.submit([encoder.finish()]);
+      await this.device.queue.onSubmittedWorkDone();
+    }
+
+    async processFrame(width, height, sequence) {
+      this.inFlight += 1;
+      try {
+        if (!this.neuralEnabled) {
+          await this.renderOriginalFrame();
+          if (!this.rendered) {
+            this.rendered = true;
+            this.resolveFirstFrame?.();
+          }
+          return;
+        }
+        const [processWidth, processHeight] = this.processingSize(width, height);
+        const outputTexture = await this.neuralFrame(processWidth, processHeight);
+        if (!this.running || sequence < this.lastDisplayedSequence) {
+          setTimeout(() => outputTexture.destroy(), 1000);
+          return;
+        }
+        const displayBindGroup = this.device.createBindGroup({
+          layout: this.displayTexturePipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: outputTexture.createView() },
+            { binding: 1, resource: this.sampler },
+          ],
+        });
+        const encoder = this.device.createCommandEncoder();
+        const pass = encoder.beginRenderPass({
+          colorAttachments: [{
+            view: this.context.getCurrentTexture().createView(),
+            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+            loadOp: "clear",
+            storeOp: "store",
+          }],
+        });
+        pass.setPipeline(this.displayTexturePipeline);
+        pass.setBindGroup(0, displayBindGroup);
+        pass.draw(6);
+        pass.end();
+        this.lastDisplayedSequence = sequence;
+        this.device.queue.submit([encoder.finish()]);
+        await this.device.queue.onSubmittedWorkDone();
+        setTimeout(() => outputTexture.destroy(), 1000);
+        if (!this.rendered) {
+          this.rendered = true;
+          this.video.style.visibility = "hidden";
+          this.resolveFirstFrame?.();
+        }
+      } catch (error) {
+        this.canvas.dataset.error = error instanceof Error ? error.message : String(error);
+        this.video.style.visibility = "";
+        this.neuralEnabled = false;
+        await this.renderOriginalFrame();
+        if (!this.rendered) {
+          this.rendered = true;
+          this.resolveFirstFrame?.();
+        }
+      } finally {
+        this.inFlight -= 1;
+      }
+    }
+
     async frame() {
       if (!this.running) return;
       const width = this.video.videoWidth;
       const height = this.video.videoHeight;
-      if (this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && width > 0 && height > 0) {
-        try {
-          if (this.processing) {
-            requestAnimationFrame(() => this.frame());
-            return;
-          }
-          this.processing = true;
-          const outputTexture = await this.neuralFrame(width, height);
-          const displayBindGroup = this.device.createBindGroup({
-            layout: this.displayTexturePipeline.getBindGroupLayout(0),
-            entries: [
-              { binding: 0, resource: outputTexture.createView() },
-              { binding: 1, resource: this.sampler },
-            ],
-          });
-          const encoder = this.device.createCommandEncoder();
-          const pass = encoder.beginRenderPass({
-            colorAttachments: [{
-              view: this.context.getCurrentTexture().createView(),
-              clearValue: { r: 0, g: 0, b: 0, a: 1 },
-              loadOp: "clear",
-              storeOp: "store",
-            }],
-          });
-          pass.setPipeline(this.displayTexturePipeline);
-          pass.setBindGroup(0, displayBindGroup);
-          pass.draw(6);
-          pass.end();
-          this.device.queue.submit([encoder.finish()]);
-          if (!this.rendered) {
-            this.device.queue.onSubmittedWorkDone().then(() => {
-              if (!this.running || this.rendered) return;
-              this.rendered = true;
-              this.video.style.visibility = "hidden";
-              this.resolveFirstFrame?.();
-            });
-          }
-        } catch (error) {
-          this.canvas.dataset.error = error instanceof Error ? error.message : String(error);
-          this.video.style.visibility = "";
-          this.rejectFirstFrame?.(error);
-        } finally {
-          this.processing = false;
+      const now = performance.now();
+      const videoTime = this.video.currentTime;
+      const canProcess = document.visibilityState === "visible"
+        && (!this.rendered || !this.video.paused)
+        && videoTime !== this.lastVideoTime
+        && now - this.lastProcessAt >= this.minFrameInterval;
+      if (canProcess && this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && width > 0 && height > 0) {
+        if (this.inFlight < this.maxConcurrentFrames) {
+          this.lastVideoTime = videoTime;
+          this.lastProcessAt = now;
+          const sequence = this.frameSequence++;
+          void this.processFrame(width, height, sequence);
         }
       }
       requestAnimationFrame(() => this.frame());

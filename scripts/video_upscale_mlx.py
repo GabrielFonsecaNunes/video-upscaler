@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import platform
 import shutil
 import subprocess
 import sys
@@ -32,13 +33,32 @@ def frame_rate(ffprobe: str, source: Path) -> str:
     return value if value != "0/0" else "30"
 
 
+def supports_encoder(ffmpeg: str, encoder: str) -> bool:
+    result = subprocess.run([ffmpeg, "-hide_banner", "-encoders"], capture_output=True, check=True, text=True)
+    return any(encoder in line.split() for line in (result.stdout + result.stderr).splitlines())
+
+
+def encode_command(ffmpeg: str, rate: str, enlarged: Path, source: Path, destination: Path, encoder: str) -> list[str]:
+    command = [ffmpeg, "-hide_banner", "-y", "-threads", "0", "-framerate", rate, "-i", str(enlarged / "frame_%08d.png"), "-i", str(source), "-map", "0:v:0", "-map", "1:a?", "-pix_fmt", "yuv420p"]
+    use_videotoolbox = encoder == "videotoolbox" or (encoder == "auto" and platform.system() == "Darwin" and supports_encoder(ffmpeg, "h264_videotoolbox"))
+    if use_videotoolbox:
+        command += ["-c:v", "h264_videotoolbox", "-q:v", "75", "-allow_sw", "1"]
+    else:
+        command += ["-c:v", "libx264", "-crf", "17", "-preset", "medium"]
+    command += ["-c:a", "copy", "-shortest"]
+    if destination.suffix.lower() in {".mp4", ".m4v", ".mov"}:
+        command += ["-movflags", "+faststart"]
+    return command + [str(destination)]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, nargs="?")
     parser.add_argument("output", type=Path, nargs="?")
     parser.add_argument("--scale", type=int, choices=(2,), default=2)
     parser.add_argument("--limit-seconds", type=float)
-    parser.add_argument("--tile", type=int, default=256)
+    parser.add_argument("--tile", type=int, default=512, help="Larger tiles are faster but use more unified memory")
+    parser.add_argument("--encoder", choices=("auto", "videotoolbox", "x264"), default="auto")
     parser.add_argument("--check", action="store_true")
     return parser.parse_args()
 
@@ -62,18 +82,18 @@ def main() -> int:
     frames, enlarged = work / "frames", work / "enlarged"
     frames.mkdir(); enlarged.mkdir()
     try:
-        extract = [ffmpeg, "-hide_banner", "-y", "-i", str(source)]
+        extract = [ffmpeg, "-hide_banner", "-y", "-threads", "0", "-i", str(source)]
         if args.limit_seconds:
             extract += ["-t", str(args.limit_seconds)]
         run(extract + ["-map", "0:v:0", "-fps_mode", "passthrough", str(frames / "frame_%08d.png")])
         model, native_scale = load_model("x2plus", dtype=mx.float16)
         for number, frame in enumerate(sorted(frames.glob("*.png")), start=1):
-            image = Image.open(frame).convert("RGB")
-            array = np.asarray(image, dtype=np.float32) / 255.0
+            with Image.open(frame) as image:
+                array = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
             result = upscale_image(model, array, native_scale, tile_size=args.tile, dtype=mx.float16)
             Image.fromarray(np.clip(result * 255, 0, 255).astype(np.uint8), "RGB").save(enlarged / frame.name)
             print(f"Frame {number}", flush=True)
-        run([ffmpeg, "-hide_banner", "-y", "-framerate", rate, "-i", str(enlarged / "frame_%08d.png"), "-i", str(source), "-map", "0:v:0", "-map", "1:a?", "-c:v", "libx264", "-crf", "17", "-preset", "medium", "-c:a", "copy", "-shortest", str(destination)])
+        run(encode_command(ffmpeg, rate, enlarged, source, destination, args.encoder))
     except subprocess.CalledProcessError as error:
         print(f"Error: command failed ({error.returncode}).", file=sys.stderr)
         return error.returncode or 1

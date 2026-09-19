@@ -108,7 +108,7 @@ function attach(video) {
   attached.add(video);
   const control = document.createElement("div");
   control.className = "vu-action";
-  control.innerHTML = '<span>Melhorar vídeo</span><button type="button" data-mode="webgpu">WebGPU 2×</button><button type="button" data-mode="local">Prévia local</button>';
+  control.innerHTML = '<span>Melhorar vídeo</span><button type="button" data-mode="webgpu">WebGPU 2×</button><button type="button" data-mode="local">Salvar 30 s em 2×</button>';
   (document.body || document.documentElement).append(control);
 
   const update = () => place(control, video);
@@ -121,7 +121,7 @@ function attach(video) {
       const isWebGPU = button.dataset.mode === "webgpu";
       const buttons = control.querySelectorAll("button");
       buttons.forEach((item) => { item.disabled = true; });
-      button.textContent = isWebGPU ? "Iniciando GPU…" : "Enviando…";
+      button.textContent = isWebGPU ? "Iniciando GPU…" : "Renderizando 30 s…";
       if (isWebGPU) {
         try {
           await startWebGPU(video);
@@ -141,12 +141,12 @@ function attach(video) {
         videoUrl: selectedUrl(video),
         title: document.title,
         scale: 2,
-        limitSeconds: 10
+        limitSeconds: 30
       });
       if (reply?.ok) {
         const output = reply.result?.output;
         if (output && await replaceVideoSource(video, output)) {
-          button.textContent = "Atualizado";
+          button.textContent = "30 s salvos";
           const link = document.createElement("a");
           link.href = output;
           link.target = "_blank";
@@ -157,9 +157,13 @@ function attach(video) {
           setTimeout(() => { control.remove(); }, 2000);
           return;
         }
-        button.textContent = "Concluído";
+        button.textContent = "Renderização de 30 s concluída";
       } else {
-        button.textContent = "Instale o componente local";
+        button.textContent = "Renderização não iniciada";
+        const detail = document.createElement("small");
+        detail.textContent = reply?.error || "Instale ou registre o componente local";
+        detail.className = "vu-error";
+        control.append(detail);
       }
       setTimeout(() => { control.remove(); }, 2400);
     });

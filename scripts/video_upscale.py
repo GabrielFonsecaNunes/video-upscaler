@@ -59,12 +59,41 @@ def frame_rate(ffprobe: str, source: Path) -> str:
     return value if value != "0/0" else "30"
 
 
+def supports_encoder(ffmpeg: str, encoder: str) -> bool:
+    result = subprocess.run(
+        [ffmpeg, "-hide_banner", "-encoders"], text=True, capture_output=True, check=True,
+    )
+    return any(encoder in line.split() for line in (result.stdout + result.stderr).splitlines())
+
+
+def encode_command(
+    ffmpeg: str, rate: str, enlarged: Path, source: Path, destination: Path, encoder: str,
+) -> list[str]:
+    command = [ffmpeg, "-hide_banner", "-y", "-threads", "0", "-framerate", rate, "-i",
+               str(enlarged / "frame_%08d.png"), "-i", str(source), "-map", "0:v:0",
+               "-map", "1:a?", "-pix_fmt", "yuv420p"]
+    use_videotoolbox = encoder == "videotoolbox" or (
+        encoder == "auto" and platform.system() == "Darwin" and supports_encoder(ffmpeg, "h264_videotoolbox")
+    )
+    if use_videotoolbox:
+        command += ["-c:v", "h264_videotoolbox", "-q:v", "75", "-allow_sw", "1"]
+    else:
+        command += ["-c:v", "libx264", "-crf", "17", "-preset", "medium"]
+    command += ["-c:a", "copy", "-shortest"]
+    if destination.suffix.lower() in {".mp4", ".m4v", ".mov"}:
+        command += ["-movflags", "+faststart"]
+    return command + [str(destination)]
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, nargs="?", help="Source video")
     parser.add_argument("output", type=Path, nargs="?", help="New output video")
     parser.add_argument("--scale", choices=(2, 3, 4), type=int, default=2)
     parser.add_argument("--model", default="realesrgan-x4plus")
+    parser.add_argument("--jobs", default="2:4:2", help="Real-ESRGAN workers: load:process:save")
+    parser.add_argument("--tile", type=int, default=0, help="Real-ESRGAN tile size; 0 automatically maximizes it")
+    parser.add_argument("--encoder", choices=("auto", "videotoolbox", "x264"), default="auto")
     parser.add_argument("--limit-seconds", type=float, help="Process only an initial preview")
     parser.add_argument("--keep-frames", action="store_true")
     parser.add_argument("--check", action="store_true")
@@ -102,20 +131,17 @@ def main() -> int:
     frames, enlarged = work / "frames", work / "enlarged"
     frames.mkdir(); enlarged.mkdir()
     try:
-        extract = [ffmpeg, "-hide_banner", "-y", "-i", str(source)]
+        extract = [ffmpeg, "-hide_banner", "-y", "-threads", "0", "-i", str(source)]
         if args.limit_seconds:
             extract += ["-t", str(args.limit_seconds)]
         run(extract + ["-map", "0:v:0", "-fps_mode", "passthrough", str(frames / "frame_%08d.png")])
         model_dir = Path(realesrgan).resolve().parent / "models"
         enhance = [realesrgan, "-i", str(frames), "-o", str(enlarged), "-n", args.model,
-                   "-s", str(args.scale), "-f", "png"]
+                   "-s", str(args.scale), "-t", str(args.tile), "-j", args.jobs, "-f", "png"]
         if model_dir.is_dir():
             enhance += ["-m", str(model_dir)]
         run(enhance)
-        run([ffmpeg, "-hide_banner", "-y", "-framerate", rate, "-i",
-             str(enlarged / "frame_%08d.png"), "-i", str(source), "-map", "0:v:0",
-             "-map", "1:a?", "-c:v", "libx264", "-crf", "17", "-preset", "medium",
-             "-c:a", "copy", "-shortest", str(destination)])
+        run(encode_command(ffmpeg, rate, enlarged, source, destination, args.encoder))
     except subprocess.CalledProcessError as error:
         print(f"Error: command failed ({error.returncode}).", file=sys.stderr)
         return error.returncode or 1

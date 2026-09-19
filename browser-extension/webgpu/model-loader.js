@@ -33,9 +33,9 @@ class WebGPUModelLoader {
     return { buffer: this.buffers.get(name), shape: tensor.shape, layout: tensor.layout };
   }
 
-  weightsFor(prefix) {
+  weightsFor(prefix, suffix = "") {
     const names = Object.keys(this.manifest.weights)
-      .filter((name) => name.startsWith(prefix))
+      .filter((name) => name.startsWith(prefix) && name.endsWith(suffix))
       .sort((a, b) => {
         const ai = Number(a.split(".")[1]);
         const bi = Number(b.split(".")[1]);
