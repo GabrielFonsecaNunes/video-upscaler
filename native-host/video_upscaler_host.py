@@ -26,6 +26,28 @@ OUTPUT = Path.home() / "Videos" / "Video Upscaler"
 STREAM_ENGINE = ROOT / "streaming-engine" / "video-upscaler-engine"
 MAX_MESSAGE_SIZE = 32 * 1024 * 1024
 LOG_FILE = OUTPUT / "native-host.log"
+TOOL_DIRECTORIES = (
+    ROOT / ".apple-silicon-env" / "bin",
+    Path("/opt/homebrew/bin"),
+    Path("/usr/local/bin"),
+    Path("/Library/Frameworks/Python.framework/Versions/3.14/bin"),
+    Path("/usr/bin"),
+    Path("/bin"),
+)
+
+
+def configure_environment() -> None:
+    paths = [str(path) for path in TOOL_DIRECTORIES if path.is_dir()]
+    current = os.environ.get("PATH", "")
+    os.environ["PATH"] = os.pathsep.join(paths + ([current] if current else []))
+
+
+def find_executable(name: str) -> str | None:
+    for directory in TOOL_DIRECTORIES:
+        candidate = directory / name
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return shutil.which(name)
 
 
 def log_event(message: str) -> None:
@@ -128,9 +150,9 @@ def download(message: dict, target: Path) -> Path:
     url = message["videoUrl"]
     page = message.get("pageUrl", "")
     if "youtube.com" in page or "youtu.be" in page:
-        yt_dlp = shutil.which("yt-dlp")
+        yt_dlp = find_executable("yt-dlp")
         if not yt_dlp:
-            raise RuntimeError("yt-dlp não encontrado no PATH")
+            raise RuntimeError("yt-dlp não encontrado. Verifique a instalação local.")
         subprocess.run(
             [yt_dlp, "--no-playlist", "-f",
             "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]",
@@ -155,6 +177,7 @@ def ensure_stream_engine() -> Path | None:
 
 
 def main() -> None:
+    configure_environment()
     log_event(f"start argv={sys.argv!r}")
     if len(sys.argv) == 5 and sys.argv[1] == "--serve":
         serve_output(Path(sys.argv[2]).resolve(), sys.argv[3], int(sys.argv[4]))
