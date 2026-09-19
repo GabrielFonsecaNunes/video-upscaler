@@ -30,7 +30,6 @@ class OutputHandler(SimpleHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         return
 
-
 def serve_output(directory: Path, token: str, port: int) -> None:
     class TokenHandler(OutputHandler):
         def translate_path(self, path: str) -> str:

@@ -17,3 +17,4 @@
 .vu-action button:disabled { opacity: .65; cursor: wait; }
 .vu-result-video { display: block; }
 .vu-result-link { color: #c4b5fd; text-decoration: underline; }
+.vu-webgpu-canvas { display: block; }

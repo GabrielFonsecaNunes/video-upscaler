@@ -56,3 +56,15 @@ python scripts/video_upscale.py input.mp4 output-2x.mp4 --scale 2
 ```
 
 The output must have a different name from the input. For the included 360p trailer, 2x produces 1280×720.
+
+## WebGPU branch
+
+The `webgpu` branch adds a browser-only path. It copies the current video frame into a
+WebGPU texture and renders a 2x canvas overlay with linear filtering and a lightweight
+sharpening shader. It keeps the original video as the audio and playback clock, so no
+download or Native Messaging host is required for this mode.
+
+This first browser path is a GPU shader baseline, not the full Real-ESRGAN neural model.
+The model can be added later by converting its weights and convolution layers to an
+ONNX/WebGPU or WGSL representation. WebGPU must be enabled in the browser, and DRM
+protected media cannot be read by the extension.

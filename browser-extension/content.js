@@ -32,6 +32,14 @@ async function processVideo(video, isPreview) {
   return replaceVideoSource(video, reply.result.output);
 }
 
+async function startWebGPU(video) {
+  if (!globalThis.VideoUpscalerWebGPU) throw new Error("WebGPU não carregado");
+  const upscaler = new globalThis.VideoUpscalerWebGPU(video);
+  await upscaler.start();
+  video.dataset.vuWebgpu = "true";
+  return true;
+}
+
 function addYouTubeQualityOption(video) {
   const menu = document.querySelector(".ytp-settings-menu");
   if (!menu || menuAttached.has(menu)) return;
@@ -40,14 +48,19 @@ function addYouTubeQualityOption(video) {
   item.className = "ytp-menuitem vu-youtube-option";
   item.setAttribute("role", "menuitem");
   item.tabIndex = 0;
-  item.innerHTML = '<div class="ytp-menuitem-label">Video Upscaler — 2×</div>';
+  item.innerHTML = '<div class="ytp-menuitem-label">Video Upscaler — WebGPU 2×</div>';
   item.addEventListener("click", async () => {
     item.setAttribute("aria-disabled", "true");
     item.querySelector(".ytp-menuitem-label").textContent = "Processando vídeo…";
-    const success = await processVideo(video, true);
+    let success = false;
+    try {
+      success = await startWebGPU(video);
+    } catch (error) {
+      success = false;
+    }
     item.querySelector(".ytp-menuitem-label").textContent = success
-      ? "Video Upscaler — reproduzindo"
-      : "Video Upscaler — erro";
+      ? "Video Upscaler — WebGPU ativo"
+      : "Video Upscaler — WebGPU indisponível";
   });
   menu.append(item);
 }
@@ -94,7 +107,7 @@ function attach(video) {
   attached.add(video);
   const control = document.createElement("div");
   control.className = "vu-action";
-  control.innerHTML = '<span>Melhorar vídeo</span><button type="button">Prévia 2×</button><button type="button">2× completo</button>';
+  control.innerHTML = '<span>Melhorar vídeo</span><button type="button" data-mode="webgpu">WebGPU 2×</button><button type="button" data-mode="local">Prévia local</button>';
   (document.body || document.documentElement).append(control);
 
   const update = () => place(control, video);
@@ -104,17 +117,26 @@ function attach(video) {
 
   control.querySelectorAll("button").forEach((button) => {
     button.addEventListener("click", async () => {
-      const isPreview = button.textContent.includes("Prévia");
+      const isWebGPU = button.dataset.mode === "webgpu";
       const buttons = control.querySelectorAll("button");
       buttons.forEach((item) => { item.disabled = true; });
-      button.textContent = "Enviando…";
+      button.textContent = isWebGPU ? "Iniciando GPU…" : "Enviando…";
+      if (isWebGPU) {
+        try {
+          await startWebGPU(video);
+          button.textContent = "WebGPU ativo";
+        } catch (error) {
+          button.textContent = "WebGPU indisponível";
+        }
+        return;
+      }
       const reply = await browserApi.runtime.sendMessage({
         type: "UPSCALE_VIDEO",
         pageUrl: location.href,
         videoUrl: selectedUrl(video),
         title: document.title,
         scale: 2,
-        limitSeconds: isPreview ? 10 : null
+        limitSeconds: 10
       });
       if (reply?.ok) {
         const output = reply.result?.output;
