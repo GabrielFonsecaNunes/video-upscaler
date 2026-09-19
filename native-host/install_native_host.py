@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import platform
+import shlex
 import shutil
 import stat
 import sys
@@ -14,6 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 HOST = ROOT / "native-host" / "video_upscaler_host.py"
+LAUNCHER = ROOT / "native-host" / "video_upscaler_host_launcher"
 NAME = "com.local_video_upscaler"
 FIREFOX_ID = "video-upscaler-local@examp3le.com"
 
@@ -39,7 +41,8 @@ def destination(browser: str) -> Path:
 
 
 def manifest(browser: str, extension_id: str) -> dict:
-    payload = {"name": NAME, "description": "Local Video Upscaler companion", "path": str(HOST), "type": "stdio"}
+    host_path = LAUNCHER if platform.system() != "Windows" else HOST
+    payload = {"name": NAME, "description": "Local Video Upscaler companion", "path": str(host_path), "type": "stdio"}
     payload["allowed_extensions" if browser == "firefox" else "allowed_origins"] = [
         FIREFOX_ID if browser == "firefox" else f"chrome-extension://{extension_id}/"
     ]
@@ -57,6 +60,11 @@ def main() -> int:
     if not HOST.is_file():
         raise RuntimeError(f"Host program not found: {HOST}")
     HOST.chmod(HOST.stat().st_mode | stat.S_IXUSR)
+    if platform.system() != "Windows":
+        LAUNCHER.write_text(
+            f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(HOST))} \"$@\"\n"
+        )
+        LAUNCHER.chmod(LAUNCHER.stat().st_mode | stat.S_IXUSR)
     if platform.system() == "Windows":
         if not args.print_windows_registry:
             raise RuntimeError("Use --print-windows-registry on Windows.")
