@@ -3,3 +3,4 @@ __pycache__/
 .DS_Store
 native-host/video_upscaler_host_launcher
 tools/onnx-models/
+.coreml-env/

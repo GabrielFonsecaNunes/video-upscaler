@@ -12,8 +12,12 @@ from pathlib import Path
 from urllib.request import urlretrieve
 
 import numpy as np
-import onnxruntime as ort
 from PIL import Image
+
+try:
+    import onnxruntime as ort
+except ImportError:
+    ort = None
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_DIR = ROOT / "tools" / "onnx-models"
@@ -47,6 +51,8 @@ def ensure_model() -> Path:
 
 
 def session() -> ort.InferenceSession:
+    if ort is None:
+        raise RuntimeError("onnxruntime is required for the ONNX backend")
     providers = ["CoreMLExecutionProvider", "CPUExecutionProvider"]
     return ort.InferenceSession(str(ensure_model()), providers=providers)
 

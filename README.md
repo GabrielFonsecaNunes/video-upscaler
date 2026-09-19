@@ -19,7 +19,7 @@ The extension is intended for laptops, desktops, and supported tablet or mobile 
 
 The extension never sends frames to a paid web service. It uses the included `native-host/` companion to download the video only after the user clicks a button, then processes it on the same computer. Results are saved in `Videos/Video Upscaler`.
 
-On Apple Silicon, the companion automatically uses ONNX Runtime with the Real-ESRGAN x4 model in `scripts/video_upscale_onnx.py`, using CoreML when available and CPU as fallback. The model is downloaded once to `tools/onnx-models/`. The 2× option runs the x4 model and downsamples its result; frames are decoded and encoded through FFmpeg pipes without a temporary PNG sequence.
+On Apple Silicon, the companion uses the converted CoreML model in `scripts/video_upscale_coreml.py` when `.coreml-env/` and the `.mlpackage` are available. It falls back to ONNX Runtime in `scripts/video_upscale_onnx.py` otherwise. The model is downloaded once to `tools/onnx-models/`. Frames are decoded and encoded through FFmpeg pipes without a temporary PNG sequence.
 
 ## Hybrid streaming branch
 
@@ -64,6 +64,7 @@ On YouTube, the companion receives the regular page address rather than a short-
 - FFmpeg and FFprobe
 - `realesrgan-ncnn-vulkan` (or `realesrgan-ncnn-py`) with its `models` folder
 - `onnxruntime`, `onnx`, and `Pillow` for the Apple Silicon ONNX backend
+- `coremltools`, `onnx2torch`, and PyTorch in Python 3.12 for optional CoreML conversion
 
 Place executables in the system PATH, or use this layout:
 
@@ -82,3 +83,16 @@ python scripts/video_upscale.py input.mp4 output-2x.mp4 --scale 2
 ```
 
 The output must have a different name from the input. For the included 360p trailer, 2x produces 1280×720.
+
+### CoreML conversion on Apple Silicon
+
+CoreML conversion is a one-time build step. Use a Python 3.12 environment because
+the native `coremltools` runtime is not available in every Python version:
+
+```sh
+python scripts/convert_onnx_to_coreml.py \
+  tools/onnx-models/real-esrgan-x4plus-128.onnx \
+  tools/onnx-models/real-esrgan-x4plus-128.mlpackage
+```
+
+The generated `.mlpackage` uses FP16 weights and a fixed 128×128 tile input.

@@ -22,7 +22,10 @@ ROOT = Path(__file__).resolve().parents[1]
 UPSCALE = ROOT / "scripts" / "video_upscale.py"
 MLX_UPSCALE = ROOT / "scripts" / "video_upscale_mlx.py"
 ONNX_UPSCALE = ROOT / "scripts" / "video_upscale_onnx.py"
+COREML_UPSCALE = ROOT / "scripts" / "video_upscale_coreml.py"
 MLX_PYTHON = ROOT / ".apple-silicon-env" / "bin" / "python"
+COREML_PYTHON = ROOT / ".coreml-env" / "bin" / "python"
+COREML_MODEL = ROOT / "tools" / "onnx-models" / "real-esrgan-x4plus-128.mlpackage"
 OUTPUT = Path.home() / "Videos" / "Video Upscaler"
 STREAM_ENGINE = ROOT / "streaming-engine" / "video-upscaler-engine"
 MODELS = {"x2plus": 2, "x4plus": 4, "anime_6B": 4, "animevideo": 4, "general": 4}
@@ -208,7 +211,8 @@ def main() -> None:
     try:
         download(message, source)
         use_mlx = platform.system() == "Darwin" and platform.machine() == "arm64" and MLX_PYTHON.is_file()
-        use_onnx = use_mlx and ONNX_UPSCALE.is_file()
+        use_coreml = use_mlx and COREML_PYTHON.is_file() and COREML_UPSCALE.is_file() and COREML_MODEL.is_dir()
+        use_onnx = use_mlx and ONNX_UPSCALE.is_file() and not use_coreml
         model = message.get("model", "x2plus")
         if model not in MODELS:
             raise ValueError(f"Modelo inválido: {model}")
@@ -219,7 +223,10 @@ def main() -> None:
             "animevideo": "realesr-animevideov3",
             "general": "realesr-general-x4v3",
         }[model]
-        if use_onnx:
+        if use_coreml:
+            command = [str(COREML_PYTHON), str(COREML_UPSCALE), str(source), str(destination),
+                       "--scale", str(MODELS[model])]
+        elif use_onnx:
             command = [str(MLX_PYTHON), str(ONNX_UPSCALE), str(source), str(destination),
                        "--scale", str(MODELS[model])]
         else:
