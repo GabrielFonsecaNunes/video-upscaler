@@ -37,6 +37,17 @@ scaling as a transport smoke test; the neural backend is intentionally isolated
 behind the same protocol for later ONNX Runtime, NCNN, Vulkan, or WebGPU
 integration.
 
+The extension sends `enableNativeEngine: true` on every request. The native
+host only honors it for the `x2plus` model on Apple Silicon **when the CoreML
+and ONNX Runtime backends are unavailable**, since only the direct MLX script
+(`scripts/video_upscale_mlx.py`) accepts `--stream-engine`; see the
+`use_mlx_direct` check in `native-host/video_upscaler_host.py`. When that
+path runs, frames flow from FFmpeg through the C++ engine and MLX
+(`realesrgan-x2plus`) without ever touching disk as a PNG sequence. On a
+machine where CoreML is configured (the default once `.coreml-env/` and the
+converted `.mlpackage` exist), the CoreML backend is used instead and the
+streaming engine is not invoked.
+
 Build it with CMake when available, or compile `streaming-engine/main.cpp`
 directly with a C++17 compiler. The Python adapter reads raw RGB frames from
 stdin and writes processed RGB frames to stdout:

@@ -36,7 +36,10 @@ async function processVideo(video, isPreview) {
     videoUrl: selectedUrl(video),
     title: document.title,
     scale: 2,
-    limitSeconds: isPreview ? 5 : null
+    limitSeconds: isPreview ? 5 : null,
+    // Lets the native host route x2plus through streaming-engine/ (frame-by-frame,
+    // no PNG sequence) instead of only the direct MLX call. See video_upscaler_host.py.
+    enableNativeEngine: true
   });
   if (!reply?.ok || !reply.result?.output) {
     throw new Error(reply?.error || "O processamento local falhou.");
@@ -111,7 +114,10 @@ async function runNativePipeline(video, model, isPreview) {
     videoUrl: selectedUrl(video),
     title: document.title,
     scale: 2,
-    limitSeconds: isPreview ? 5 : null
+    limitSeconds: isPreview ? 5 : null,
+    // See video_upscaler_host.py: only applies to the x2plus MLX path, and is
+    // ignored otherwise (ONNX/CoreML/NCNN paths do not read this flag).
+    enableNativeEngine: true
   });
   if (!reply?.ok) {
     throw new Error(reply?.error || "Instale o componente local");

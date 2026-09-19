@@ -233,7 +233,11 @@ def main() -> None:
             command = [str(MLX_PYTHON) if use_mlx else sys.executable,
                        str(MLX_UPSCALE if use_mlx else UPSCALE), str(source), str(destination),
                        "--scale", str(MODELS[model]), "--model", backend_model]
-        if use_mlx and not use_onnx and model == "x2plus" and message.get("enableNativeEngine") is True:
+        # streaming-engine/ only wires into the direct MLX invocation below
+        # (video_upscale_mlx.py); the CoreML and ONNX scripts don't accept
+        # --stream-engine, so this must stay mutually exclusive with both.
+        use_mlx_direct = use_mlx and not use_coreml and not use_onnx
+        if use_mlx_direct and model == "x2plus" and message.get("enableNativeEngine") is True:
             stream_engine = ensure_stream_engine()
             if stream_engine is not None:
                 command += ["--stream-engine", str(stream_engine)]
