@@ -103,6 +103,8 @@ def read_message() -> dict | None:
 
 def send_message(payload: dict) -> None:
     encoded = json.dumps(payload).encode("utf-8")
+    if len(encoded) > MAX_MESSAGE_SIZE:
+        raise RuntimeError("Resposta Native Messaging excede o limite permitido")
     sys.stdout.buffer.write(struct.pack("<I", len(encoded)) + encoded)
     sys.stdout.buffer.flush()
 

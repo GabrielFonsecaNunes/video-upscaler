@@ -5,7 +5,13 @@ browserApi.runtime.onMessage.addListener((message) => {
   if (message.type !== "UPSCALE_VIDEO") return undefined;
 
   return browserApi.runtime.sendNativeMessage(HOST_NAME, message)
-    .then((result) => ({ ok: true, result }))
+    .then((result) => {
+      if (result?.error) {
+        console.error("Video Upscaler Native Host failed:", result.error);
+        return { ok: false, error: result.error };
+      }
+      return { ok: true, result };
+    })
     .catch((error) => {
       const detail = error?.message || String(error);
       console.error("Video Upscaler Native Host error:", detail);
