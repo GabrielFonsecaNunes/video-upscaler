@@ -24,6 +24,7 @@ MLX_UPSCALE = ROOT / "scripts" / "video_upscale_mlx.py"
 MLX_PYTHON = ROOT / ".apple-silicon-env" / "bin" / "python"
 OUTPUT = Path.home() / "Videos" / "Video Upscaler"
 STREAM_ENGINE = ROOT / "streaming-engine" / "video-upscaler-engine"
+MODELS = {"x2plus": 2, "x4plus": 4, "anime_6B": 4, "animevideo": 4, "general": 4}
 MAX_MESSAGE_SIZE = 32 * 1024 * 1024
 LOG_FILE = OUTPUT / "native-host.log"
 TOOL_DIRECTORIES = (
@@ -200,20 +201,41 @@ def main() -> None:
     try:
         download(message, source)
         use_mlx = platform.system() == "Darwin" and platform.machine() == "arm64" and MLX_PYTHON.is_file()
-        command = [str(MLX_PYTHON) if use_mlx else sys.executable, str(MLX_UPSCALE if use_mlx else UPSCALE), str(source), str(destination), "--scale", str(message.get("scale", 2))]
-        if use_mlx and message.get("enableNativeEngine") is True:
+        model = message.get("model", "x2plus")
+        if model not in MODELS:
+            raise ValueError(f"Modelo inválido: {model}")
+        backend_model = model if use_mlx else {
+            "x2plus": "realesrgan-x2plus",
+            "x4plus": "realesrgan-x4plus",
+            "anime_6B": "realesrgan-x4plus-anime",
+            "animevideo": "realesr-animevideov3",
+            "general": "realesr-general-x4v3",
+        }[model]
+        command = [str(MLX_PYTHON) if use_mlx else sys.executable, str(MLX_UPSCALE if use_mlx else UPSCALE), str(source), str(destination), "--scale", str(MODELS[model]), "--model", backend_model]
+        if use_mlx and model == "x2plus" and message.get("enableNativeEngine") is True:
             stream_engine = ensure_stream_engine()
             if stream_engine is not None:
                 command += ["--stream-engine", str(stream_engine)]
         if message.get("limitSeconds"):
             command += ["--limit-seconds", str(message["limitSeconds"])]
             command += ["--preview-fps", "30"]
-        subprocess.run(command, check=True, stdout=sys.stderr)
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+        if result.stdout:
+            log_event(result.stdout[-8000:])
+        if result.stderr:
+            log_event(result.stderr[-12000:])
+        if result.returncode:
+            raise subprocess.CalledProcessError(
+                result.returncode, command, output=result.stdout, stderr=result.stderr
+            )
         log_event(f"completed output={destination}")
         send_message({"output": output_url(destination), "path": str(destination)})
     except Exception as error:
         log_event(traceback.format_exc())
-        send_message({"error": str(error)})
+        detail = str(error)
+        if isinstance(error, subprocess.CalledProcessError) and error.stderr:
+            detail = f"{detail}: {error.stderr[-4000:]}"
+        send_message({"error": detail})
 
 
 if __name__ == "__main__":

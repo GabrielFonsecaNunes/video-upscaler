@@ -23,6 +23,7 @@ async function processVideo(video, isPreview) {
   const reply = await browserApi.runtime.sendMessage({
     type: "UPSCALE_VIDEO",
     pipeline: "hybrid-streaming",
+    model: "x2plus",
     pageUrl: location.href,
     videoUrl: selectedUrl(video),
     title: document.title,
@@ -102,7 +103,7 @@ function attach(video) {
   attached.add(video);
   const control = document.createElement("div");
   control.className = "vu-action";
-  control.innerHTML = '<span>Melhorar vídeo</span><button type="button">Prévia 2×</button><button type="button">2× completo</button>';
+  control.innerHTML = '<span>Melhorar vídeo</span><label>Modelo <select class="vu-model"><option value="x2plus">Real-ESRGAN x2 (rápido)</option><option value="animevideo">AnimeVideo x4</option><option value="general">General x4</option><option value="x4plus">Real-ESRGAN x4</option><option value="anime_6B">Anime x4 (qualidade)</option></select></label><button type="button">Prévia</button><button type="button">Processar</button>';
   (document.body || document.documentElement).append(control);
 
   const update = () => place(control, video);
@@ -113,12 +114,14 @@ function attach(video) {
   control.querySelectorAll("button").forEach((button) => {
     button.addEventListener("click", async () => {
       const isPreview = button.textContent.includes("Prévia");
+      const model = control.querySelector(".vu-model").value;
       const buttons = control.querySelectorAll("button");
       buttons.forEach((item) => { item.disabled = true; });
       button.textContent = "Enviando…";
       const reply = await browserApi.runtime.sendMessage({
         type: "UPSCALE_VIDEO",
         pipeline: "hybrid-streaming",
+        model,
         pageUrl: location.href,
         videoUrl: selectedUrl(video),
         title: document.title,

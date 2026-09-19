@@ -44,7 +44,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, nargs="?")
     parser.add_argument("output", type=Path, nargs="?")
-    parser.add_argument("--scale", type=int, choices=(2,), default=2)
+    parser.add_argument("--scale", type=int, choices=(2, 4), default=2)
+    parser.add_argument("--model", choices=("x2plus", "x4plus", "anime_6B", "animevideo", "general"), default="x2plus")
     parser.add_argument("--limit-seconds", type=float)
     parser.add_argument("--preview-fps", type=int)
     parser.add_argument("--tile", type=int, default=256)
@@ -87,7 +88,8 @@ def main() -> int:
     width, height, rate = video_info(ffprobe, source)
     output_rate, sample_to_30 = preview_rate(rate, args.preview_fps) if args.preview_fps else (rate, False)
     frame_size = width * height * 3
-    output_frame_size = (width * 2) * (height * 2) * 3
+    model_scale = {"x2plus": 2, "x4plus": 4, "anime_6B": 4, "animevideo": 4, "general": 4}[args.model]
+    output_frame_size = (width * model_scale) * (height * model_scale) * 3
     decode = [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(source)]
     if args.limit_seconds:
         decode += ["-t", str(args.limit_seconds)]
@@ -96,7 +98,7 @@ def main() -> int:
     decode += ["-map", "0:v:0", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
     encode = [
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-        "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width * 2}x{height * 2}",
+        "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{width * model_scale}x{height * model_scale}",
         "-framerate", output_rate, "-i", "pipe:0",
         "-i", str(source), "-map", "0:v:0", "-map", "1:a?",
         "-c:v", "libx264", "-crf", "17", "-preset", "medium",
@@ -106,9 +108,9 @@ def main() -> int:
     try:
         stream_engine = ensure_stream_engine(args.stream_engine)
         model = None
-        native_scale = 2
+        native_scale = model_scale
         if stream_engine is None:
-            model, native_scale = load_model("x2plus", dtype=mx.float16)
+            model, native_scale = load_model(args.model, dtype=mx.float16)
         decoder = subprocess.Popen(decode, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         encoder = subprocess.Popen(encode, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         if stream_engine is not None:
@@ -119,7 +121,7 @@ def main() -> int:
                     str(stream_engine),
                     "--width", str(width),
                     "--height", str(height),
-                    "--model", "x2plus",
+                    "--model", args.model,
                     "--tile", str(args.tile),
                 ],
                 stdin=subprocess.PIPE,
