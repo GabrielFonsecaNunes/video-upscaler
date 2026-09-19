@@ -64,7 +64,7 @@ def main() -> int:
         LAUNCHER.write_text(
             f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(HOST))} \"$@\"\n"
         )
-        LAUNCHER.chmod(LAUNCHER.stat().st_mode | stat.S_IXUSR)
+        LAUNCHER.chmod(0o755)
     if platform.system() == "Windows":
         if not args.print_windows_registry:
             raise RuntimeError("Use --print-windows-registry on Windows.")

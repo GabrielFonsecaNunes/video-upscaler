@@ -12,6 +12,7 @@ import struct
 import subprocess
 import sys
 import shutil
+import traceback
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
@@ -24,6 +25,13 @@ MLX_PYTHON = ROOT / ".apple-silicon-env" / "bin" / "python"
 OUTPUT = Path.home() / "Videos" / "Video Upscaler"
 STREAM_ENGINE = ROOT / "streaming-engine" / "video-upscaler-engine"
 MAX_MESSAGE_SIZE = 32 * 1024 * 1024
+LOG_FILE = OUTPUT / "native-host.log"
+
+
+def log_event(message: str) -> None:
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    with LOG_FILE.open("a", encoding="utf-8") as log:
+        log.write(message + "\n")
 
 class OutputHandler(SimpleHTTPRequestHandler):
     def end_headers(self) -> None:
@@ -135,10 +143,12 @@ def ensure_stream_engine() -> Path | None:
 
 
 def main() -> None:
+    log_event(f"start argv={sys.argv!r}")
     if len(sys.argv) == 5 and sys.argv[1] == "--serve":
         serve_output(Path(sys.argv[2]).resolve(), sys.argv[3], int(sys.argv[4]))
         return
     message = read_message()
+    log_event(f"message type={message.get('type') if message else None!r}")
     if not message or message.get("type") != "UPSCALE_VIDEO":
         send_message({"error": "Unsupported request"})
         return
@@ -159,8 +169,10 @@ def main() -> None:
             command += ["--limit-seconds", str(message["limitSeconds"])]
             command += ["--preview-fps", "30"]
         subprocess.run(command, check=True, stdout=sys.stderr)
+        log_event(f"completed output={destination}")
         send_message({"output": output_url(destination), "path": str(destination)})
     except Exception as error:
+        log_event(traceback.format_exc())
         send_message({"error": str(error)})
 
 
@@ -169,4 +181,8 @@ if __name__ == "__main__":
         main()
     except Exception as error:
         print(f"Native Host fatal error: {error}", file=sys.stderr, flush=True)
-        send_message({"error": str(error)})
+        log_event(traceback.format_exc())
+        try:
+            send_message({"error": str(error)})
+        except Exception:
+            pass

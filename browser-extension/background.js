@@ -7,7 +7,8 @@ browserApi.runtime.onMessage.addListener((message) => {
   return browserApi.runtime.sendNativeMessage(HOST_NAME, message)
     .then((result) => ({ ok: true, result }))
     .catch((error) => {
-      const detail = error.message || String(error);
+      const detail = error?.message || String(error);
+      console.error("Video Upscaler Native Host error:", detail);
       return { ok: false, error: detail };
     });
 });
