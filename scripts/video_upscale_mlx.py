@@ -48,7 +48,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit-seconds", type=float)
     parser.add_argument("--preview-fps", type=int)
     parser.add_argument("--tile", type=int, default=256)
-    parser.add_argument("--stream-engine", type=Path, default=None)
+    parser.add_argument("--stream-engine", type=Path, default=None,
+                        help="Optional C++ transport engine; direct MLX is the default")
     parser.add_argument("--check", action="store_true")
     return parser.parse_args()
 

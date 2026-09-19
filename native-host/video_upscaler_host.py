@@ -201,7 +201,7 @@ def main() -> None:
         download(message, source)
         use_mlx = platform.system() == "Darwin" and platform.machine() == "arm64" and MLX_PYTHON.is_file()
         command = [str(MLX_PYTHON) if use_mlx else sys.executable, str(MLX_UPSCALE if use_mlx else UPSCALE), str(source), str(destination), "--scale", str(message.get("scale", 2))]
-        if use_mlx:
+        if use_mlx and message.get("enableNativeEngine") is True:
             stream_engine = ensure_stream_engine()
             if stream_engine is not None:
                 command += ["--stream-engine", str(stream_engine)]
