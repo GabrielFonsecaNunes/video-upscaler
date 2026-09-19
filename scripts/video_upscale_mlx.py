@@ -61,6 +61,11 @@ def ensure_stream_engine(engine: Path | None) -> Path | None:
         compiler = shutil.which("clang++") or shutil.which("g++")
         if compiler and source.exists():
             subprocess.run([compiler, "-std=c++17", str(source), "-o", str(engine)], check=True)
+    if engine.exists() and sys.platform == "darwin":
+        subprocess.run(["xattr", "-d", "com.apple.quarantine", str(engine)],
+                       check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["codesign", "--force", "--sign", "-", str(engine)],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     return engine if engine.exists() else None
 
 
