@@ -2,6 +2,14 @@ const browserApi = globalThis.browser ?? globalThis.chrome;
 const attached = new WeakSet();
 const menuAttached = new WeakSet();
 
+// Lazily loaded so pages that never click "Processar no navegador" pay no
+// WebGPU/MediaRecorder setup cost. See browser-pipeline.js for the backend.
+let browserPipelinePromise = null;
+function loadBrowserPipeline() {
+  browserPipelinePromise ??= import(browserApi.runtime.getURL("browser-pipeline.js"));
+  return browserPipelinePromise;
+}
+
 if (window.top !== window) {
   document.documentElement.dataset.videoUpscalerFrame = "true";
 }
@@ -94,12 +102,42 @@ async function replaceVideoSource(video, outputPath) {
   }
 }
 
+async function runNativePipeline(video, model, isPreview) {
+  const reply = await browserApi.runtime.sendMessage({
+    type: "UPSCALE_VIDEO",
+    pipeline: "hybrid-streaming",
+    model,
+    pageUrl: location.href,
+    videoUrl: selectedUrl(video),
+    title: document.title,
+    scale: 2,
+    limitSeconds: isPreview ? 5 : null
+  });
+  if (!reply?.ok) {
+    throw new Error(reply?.error || "Instale o componente local");
+  }
+  const output = reply.result?.output;
+  if (!output) throw new Error("Resposta local sem vídeo processado.");
+  return output;
+}
+
+// Experimental: renders and encodes the upscaled video entirely in this tab
+// (WebGPU/Canvas2D + MediaRecorder), without the native host or FFmpeg. See
+// browser-pipeline.js. Useful when the native companion is not installed.
+async function runBrowserPipeline(video, isPreview) {
+  const { upscaleInBrowser, browserPipelineSupported } = await loadBrowserPipeline();
+  if (!browserPipelineSupported()) {
+    throw new Error("Este navegador não suporta o pipeline embutido.");
+  }
+  return upscaleInBrowser(video, { scale: 2, limitSeconds: isPreview ? 5 : null });
+}
+
 function attach(video) {
   if (attached.has(video)) return;
   attached.add(video);
   const control = document.createElement("div");
   control.className = "vu-action";
-  control.innerHTML = '<span>Melhorar vídeo</span><label>Modelo <select class="vu-model"><option value="x2plus">Real-ESRGAN x2 (rápido)</option><option value="animevideo">AnimeVideo x4</option><option value="general">General x4</option><option value="x4plus">Real-ESRGAN x4</option><option value="anime_6B">Anime x4 (qualidade)</option></select></label><button type="button">Prévia</button><button type="button">Processar</button>';
+  control.innerHTML = '<span>Melhorar vídeo</span><label>Modelo <select class="vu-model"><option value="x2plus">Real-ESRGAN x2 (rápido)</option><option value="animevideo">AnimeVideo x4</option><option value="general">General x4</option><option value="x4plus">Real-ESRGAN x4</option><option value="anime_6B">Anime x4 (qualidade)</option></select></label><button type="button" data-pipeline="native">Prévia</button><button type="button" data-pipeline="native">Processar</button><button type="button" data-pipeline="browser" title="Experimental: processa nesta aba, sem o componente local">No navegador</button>';
   (document.body || document.documentElement).append(control);
 
   const update = () => place(control, video);
@@ -110,23 +148,16 @@ function attach(video) {
   control.querySelectorAll("button").forEach((button) => {
     button.addEventListener("click", async () => {
       const isPreview = button.textContent.includes("Prévia");
+      const useBrowserPipeline = button.dataset.pipeline === "browser";
       const model = control.querySelector(".vu-model").value;
       const buttons = control.querySelectorAll("button");
       buttons.forEach((item) => { item.disabled = true; });
-      button.textContent = "Enviando…";
-      const reply = await browserApi.runtime.sendMessage({
-        type: "UPSCALE_VIDEO",
-        pipeline: "hybrid-streaming",
-        model,
-        pageUrl: location.href,
-        videoUrl: selectedUrl(video),
-        title: document.title,
-        scale: 2,
-        limitSeconds: isPreview ? 5 : null
-      });
-      if (reply?.ok) {
-        const output = reply.result?.output;
-        if (output && await replaceVideoSource(video, output)) {
+      button.textContent = useBrowserPipeline ? "Processando na aba…" : "Enviando…";
+      try {
+        const output = useBrowserPipeline
+          ? await runBrowserPipeline(video, isPreview)
+          : await runNativePipeline(video, model, isPreview);
+        if (await replaceVideoSource(video, output)) {
           button.textContent = "Atualizado";
           const link = document.createElement("a");
           link.href = output;
@@ -139,10 +170,8 @@ function attach(video) {
           return;
         }
         button.textContent = "Concluído";
-      } else {
-        button.textContent = reply?.error
-          ? `Erro: ${reply.error.slice(0, 48)}`
-          : "Instale o componente local";
+      } catch (error) {
+        button.textContent = `Erro: ${String(error?.message || error).slice(0, 48)}`;
       }
       setTimeout(() => { control.remove(); }, 2400);
     });

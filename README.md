@@ -21,6 +21,12 @@ The extension never sends frames to a paid web service. It uses the included `na
 
 On Apple Silicon, the companion uses the converted CoreML model in `scripts/video_upscale_coreml.py` when `.coreml-env/` and the `.mlpackage` are available. It falls back to ONNX Runtime in `scripts/video_upscale_onnx.py` otherwise. The model is downloaded once to `tools/onnx-models/`. Frames are decoded and encoded through FFmpeg pipes without a temporary PNG sequence.
 
+### Experimental in-browser pipeline
+
+The extension also has a **"No navegador"** button that upscales entirely inside the tab, with no native host, FFmpeg, or Real-ESRGAN involved. It is implemented in `browser-extension/browser-pipeline.js`: it re-renders the `<video>` onto a canvas at 2×/4× (WebGPU when available, Canvas 2D otherwise) and records the result with `MediaRecorder`, reusing the original audio track.
+
+This is a resampling pipeline, not a neural super-resolution model, so quality is lower than the native Real-ESRGAN backends. It exists as an alternative "Camada 3" for users without the native companion installed, and as a base for a future WebGPU compute-shader or WebNN/ONNX Runtime Web model — see `upscaleFrameWebGPU`-equivalent code in that file. The native pipeline remains the default; this backend is opt-in per click.
+
 ## Hybrid streaming branch
 
 The `streaming-hybrid` branch adds a portable C++ streaming engine under
