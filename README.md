@@ -68,3 +68,18 @@ This first browser path is a GPU shader baseline, not the full Real-ESRGAN neura
 The model can be added later by converting its weights and convolution layers to an
 ONNX/WebGPU or WGSL representation. WebGPU must be enabled in the browser, and DRM
 protected media cannot be read by the extension.
+
+### Exporting the neural model
+
+The compact `realesr-general-x4v3` model can be packaged for WebGPU with:
+
+```sh
+python3 tools/export_webgpu_model.py \
+  tools/real-esrgan-mlx/weights/realesr-general-x4v3.safetensors \
+  browser-extension/webgpu/models/realesr-general-x4v3
+```
+
+This produces `manifest.json` and `weights.bin`. The loader uploads the tensors
+to WebGPU storage buffers. The convolution compute passes are the next integration
+step; the current renderer remains the lightweight shader baseline until those
+passes are wired into the frame loop.
