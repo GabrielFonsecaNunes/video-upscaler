@@ -10,7 +10,6 @@ import sys
 import subprocess
 from pathlib import Path
 
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("engine", type=Path)
@@ -20,7 +19,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", choices=("nearest", "x2plus"), default="nearest")
     parser.add_argument("--tile", type=int, default=256)
     return parser.parse_args()
-
 
 def main() -> int:
     args = parse_args()
@@ -91,7 +89,6 @@ def main() -> int:
         process.stdin.close()
         process.wait()
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
