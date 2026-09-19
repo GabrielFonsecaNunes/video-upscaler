@@ -12,6 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MLX_SOURCE = ROOT / "tools" / "real-esrgan-mlx"
+STREAM_ENGINE = ROOT / "streaming-engine" / "video-upscaler-engine"
 sys.path.insert(0, str(MLX_SOURCE))
 
 import mlx.core as mx
@@ -47,8 +48,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit-seconds", type=float)
     parser.add_argument("--preview-fps", type=int)
     parser.add_argument("--tile", type=int, default=256)
+    parser.add_argument("--stream-engine", type=Path, default=None)
     parser.add_argument("--check", action="store_true")
     return parser.parse_args()
+
+
+def ensure_stream_engine(engine: Path | None) -> Path | None:
+    if engine is None:
+        engine = STREAM_ENGINE
+    if not engine.exists() and engine.parent.exists():
+        source = ROOT / "streaming-engine" / "main.cpp"
+        compiler = shutil.which("clang++") or shutil.which("g++")
+        if compiler and source.exists():
+            subprocess.run([compiler, "-std=c++17", str(source), "-o", str(engine)], check=True)
+    return engine if engine.exists() else None
 
 
 def main() -> int:
@@ -68,6 +81,7 @@ def main() -> int:
     width, height, rate = video_info(ffprobe, source)
     output_rate, sample_to_30 = preview_rate(rate, args.preview_fps) if args.preview_fps else (rate, False)
     frame_size = width * height * 3
+    output_frame_size = (width * 2) * (height * 2) * 3
     decode = [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(source)]
     if args.limit_seconds:
         decode += ["-t", str(args.limit_seconds)]
@@ -82,11 +96,30 @@ def main() -> int:
         "-c:v", "libx264", "-crf", "17", "-preset", "medium",
         "-c:a", "copy", "-shortest", str(destination),
     ]
-    decoder = encoder = None
+    decoder = encoder = stream_proc = None
     try:
-        model, native_scale = load_model("x2plus", dtype=mx.float16)
+        stream_engine = ensure_stream_engine(args.stream_engine)
+        model = None
+        native_scale = 2
+        if stream_engine is None:
+            model, native_scale = load_model("x2plus", dtype=mx.float16)
         decoder = subprocess.Popen(decode, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         encoder = subprocess.Popen(encode, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+        if stream_engine is not None:
+            stream_proc = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(ROOT / "streaming-engine" / "stream_frames.py"),
+                    str(stream_engine),
+                    "--width", str(width),
+                    "--height", str(height),
+                    "--model", "x2plus",
+                    "--tile", str(args.tile),
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
         number = 0
         while True:
             raw = decoder.stdout.read(frame_size)
@@ -94,16 +127,36 @@ def main() -> int:
                 break
             if len(raw) != frame_size:
                 raise RuntimeError(f"Frame incompleto recebido do FFmpeg: {len(raw)} de {frame_size} bytes")
-            array = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3).astype(np.float32) / 255.0
-            result = upscale_image(model, array, native_scale, tile_size=args.tile, dtype=mx.float16)
-            output = np.clip(result * 255, 0, 255).astype(np.uint8)
-            encoder.stdin.write(output.tobytes())
+            if stream_proc is not None:
+                assert stream_proc.stdin is not None and stream_proc.stdout is not None
+                stream_proc.stdin.write(raw)
+                stream_proc.stdin.flush()
+                processed = stream_proc.stdout.read(output_frame_size)
+                if len(processed) != output_frame_size:
+                    raise RuntimeError(
+                        f"Frame do motor incompleto: {len(processed)} bytes para {output_frame_size} esperados"
+                    )
+                encoder.stdin.write(processed)
+            else:
+                array = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3).astype(np.float32) / 255.0
+                result = upscale_image(model, array, native_scale, tile_size=args.tile, dtype=mx.float16)
+                output = np.clip(result * 255, 0, 255).astype(np.uint8)
+                encoder.stdin.write(output.tobytes())
             number += 1
             print(f"Frame {number}", flush=True)
         decoder.stdout.close()
         decoder.wait()
         if decoder.returncode:
             raise subprocess.CalledProcessError(decoder.returncode, decode, stderr=decoder.stderr.read())
+        if stream_proc is not None:
+            stream_proc.stdin.close()
+            stream_proc.wait()
+            if stream_proc.returncode:
+                raise subprocess.CalledProcessError(
+                    stream_proc.returncode,
+                    [sys.executable, str(ROOT / "streaming-engine" / "stream_frames.py")],
+                    stderr=stream_proc.stderr.read(),
+                )
         encoder.stdin.close()
         encoder.wait()
         if encoder.returncode:
@@ -112,7 +165,7 @@ def main() -> int:
         print(f"Error: command failed ({error.returncode}).", file=sys.stderr)
         return error.returncode or 1
     finally:
-        for process in (decoder, encoder):
+        for process in (decoder, encoder, stream_proc):
             if process and process.poll() is None:
                 process.kill()
     print(f"Complete: {destination}")

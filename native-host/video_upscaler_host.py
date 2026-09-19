@@ -22,6 +22,7 @@ UPSCALE = ROOT / "scripts" / "video_upscale.py"
 MLX_UPSCALE = ROOT / "scripts" / "video_upscale_mlx.py"
 MLX_PYTHON = ROOT / ".apple-silicon-env" / "bin" / "python"
 OUTPUT = Path.home() / "Videos" / "Video Upscaler"
+STREAM_ENGINE = ROOT / "streaming-engine" / "video-upscaler-engine"
 
 class OutputHandler(SimpleHTTPRequestHandler):
     def end_headers(self) -> None:
@@ -116,6 +117,15 @@ def download(message: dict, target: Path) -> Path:
     return target
 
 
+def ensure_stream_engine() -> Path | None:
+    if not STREAM_ENGINE.exists():
+        source = ROOT / "streaming-engine" / "main.cpp"
+        compiler = shutil.which("clang++") or shutil.which("g++")
+        if compiler and source.exists():
+            subprocess.run([compiler, "-std=c++17", str(source), "-o", str(STREAM_ENGINE)], check=True)
+    return STREAM_ENGINE if STREAM_ENGINE.exists() else None
+
+
 def main() -> None:
     if len(sys.argv) == 5 and sys.argv[1] == "--serve":
         serve_output(Path(sys.argv[2]).resolve(), sys.argv[3], int(sys.argv[4]))
@@ -133,6 +143,10 @@ def main() -> None:
         download(message, source)
         use_mlx = platform.system() == "Darwin" and platform.machine() == "arm64" and MLX_PYTHON.is_file()
         command = [str(MLX_PYTHON) if use_mlx else sys.executable, str(MLX_UPSCALE if use_mlx else UPSCALE), str(source), str(destination), "--scale", str(message.get("scale", 2))]
+        if use_mlx:
+            stream_engine = ensure_stream_engine()
+            if stream_engine is not None:
+                command += ["--stream-engine", str(stream_engine)]
         if message.get("limitSeconds"):
             command += ["--limit-seconds", str(message["limitSeconds"])]
             command += ["--preview-fps", "30"]

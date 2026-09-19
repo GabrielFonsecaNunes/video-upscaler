@@ -22,13 +22,16 @@ function place(control, video) {
 async function processVideo(video, isPreview) {
   const reply = await browserApi.runtime.sendMessage({
     type: "UPSCALE_VIDEO",
+    pipeline: "hybrid-streaming",
     pageUrl: location.href,
     videoUrl: selectedUrl(video),
     title: document.title,
     scale: 2,
     limitSeconds: isPreview ? 5 : null
   });
-  if (!reply?.ok || !reply.result?.output) return false;
+  if (!reply?.ok || !reply.result?.output) {
+    throw new Error(reply?.error || "O processamento local falhou.");
+  }
   return replaceVideoSource(video, reply.result.output);
 }
 
@@ -44,7 +47,12 @@ function addYouTubeQualityOption(video) {
   item.addEventListener("click", async () => {
     item.setAttribute("aria-disabled", "true");
     item.querySelector(".ytp-menuitem-label").textContent = "Processando vídeo…";
-    const success = await processVideo(video, true);
+    let success = false;
+    try {
+      success = await processVideo(video, true);
+    } catch {
+      success = false;
+    }
     item.querySelector(".ytp-menuitem-label").textContent = success
       ? "Video Upscaler — reproduzindo"
       : "Video Upscaler — erro";
@@ -110,6 +118,7 @@ function attach(video) {
       button.textContent = "Enviando…";
       const reply = await browserApi.runtime.sendMessage({
         type: "UPSCALE_VIDEO",
+        pipeline: "hybrid-streaming",
         pageUrl: location.href,
         videoUrl: selectedUrl(video),
         title: document.title,
@@ -132,7 +141,9 @@ function attach(video) {
         }
         button.textContent = "Concluído";
       } else {
-        button.textContent = "Instale o componente local";
+        button.textContent = reply?.error
+          ? `Erro: ${reply.error.slice(0, 48)}`
+          : "Instale o componente local";
       }
       setTimeout(() => { control.remove(); }, 2400);
     });

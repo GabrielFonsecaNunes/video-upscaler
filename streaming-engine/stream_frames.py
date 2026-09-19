@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import struct
 import sys
 import subprocess
@@ -34,7 +35,8 @@ def main() -> int:
         import numpy as np
         from upscale import load_model, upscale_image as mlx_upscale_image
 
-        model, native_scale = load_model("x2plus", dtype=mx.float16)
+        with contextlib.redirect_stdout(sys.stderr):
+            model, native_scale = load_model("x2plus", dtype=mx.float16)
         upscale_image = mlx_upscale_image
     engine_command = [str(args.engine)]
     if args.model == "x2plus":
