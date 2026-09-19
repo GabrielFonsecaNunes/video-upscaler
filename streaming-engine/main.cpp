@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <iostream>
+#include <string>
 #include <vector>
 
 namespace {
@@ -28,11 +29,11 @@ void write_u32(std::ostream& output, std::uint32_t value) {
 }
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   std::ios::sync_with_stdio(false);
   std::cin.tie(nullptr);
 
-  // Protocol: width, height, RGB frame bytes; output is a 2x nearest frame.
+  const bool passthrough = argc == 2 && std::string(argv[1]) == "--passthrough";
   std::uint32_t width = 0;
   std::uint32_t height = 0;
   while (read_u32(std::cin, width) && read_u32(std::cin, height)) {
@@ -41,12 +42,14 @@ int main() {
     std::vector<unsigned char> input(input_size);
     if (!read_exact(std::cin, reinterpret_cast<char*>(input.data()), input.size())) return 1;
 
-    const std::uint32_t output_width = width * 2;
-    const std::uint32_t output_height = height * 2;
+    const std::uint32_t output_width = passthrough ? width : width * 2;
+    const std::uint32_t output_height = passthrough ? height : height * 2;
     std::vector<unsigned char> output(static_cast<std::size_t>(output_width) * output_height * 3);
     for (std::uint32_t y = 0; y < output_height; ++y) {
       for (std::uint32_t x = 0; x < output_width; ++x) {
-        const std::size_t source = (static_cast<std::size_t>(y / 2) * width + x / 2) * 3;
+        const std::size_t source =
+            (static_cast<std::size_t>(passthrough ? y : y / 2) * width +
+             (passthrough ? x : x / 2)) * 3;
         const std::size_t target = (static_cast<std::size_t>(y) * output_width + x) * 3;
         output[target] = input[source];
         output[target + 1] = input[source + 1];
