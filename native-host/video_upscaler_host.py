@@ -166,6 +166,7 @@ def download(message: dict, target: Path) -> Path:
             "best[ext=mp4][height<=720]/best[ext=mp4]",
             "--merge-output-format", "mp4", "-o", str(target),
         ]
+        command += youtube_js_challenge_args()
         if limit_seconds:
             command += ["--download-sections", f"*0-{float(limit_seconds):g}"]
         command.append(page)
@@ -178,6 +179,19 @@ def download(message: dict, target: Path) -> Path:
         while chunk := response.read(1024 * 1024):
             file.write(chunk)
     return target
+
+
+def youtube_js_challenge_args() -> list[str]:
+    """YouTube now requires solving a JS "signature/n" challenge before it
+    hands out a working videoplayback URL. yt-dlp needs a JS runtime (node,
+    since deno is rarely preinstalled) plus its remote challenge-solver
+    script; without both, extraction fails with "This video is not
+    available" even though the video is public. See
+    https://github.com/yt-dlp/yt-dlp/wiki/EJS
+    """
+    if find_executable("node"):
+        return ["--js-runtimes", "node", "--remote-components", "ejs:github"]
+    return []
 
 
 def download_preview_with_ffmpeg(url: str, page: str, limit_seconds: float, target: Path) -> bool:

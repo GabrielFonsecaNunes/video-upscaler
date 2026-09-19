@@ -76,6 +76,8 @@ Native Messaging requires this browser-specific registration step so a web page 
 
 On YouTube, the companion receives the regular page address rather than a short-lived media address, so it can obtain the selected source through the local `yt-dlp` installation.
 
+YouTube requires yt-dlp to solve a JS-based signature challenge before it will return a working video URL. The native host automatically adds `--js-runtimes node --remote-components ejs:github` when a Node.js binary is available, since without it yt-dlp fails with "This video is not available" even for public videos. Install [Node.js](https://nodejs.org/) locally if `yt-dlp` still cannot fetch YouTube sources.
+
 ## Requirements
 
 - Python 3.10+
