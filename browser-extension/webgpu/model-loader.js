@@ -18,7 +18,7 @@ class WebGPUModelLoader {
     for (const [name, entry] of Object.entries(this.manifest.weights)) {
       const bytes = this.weights.slice(entry.offset * 4, (entry.offset + entry.length) * 4);
       const buffer = this.device.createBuffer({
-        size: (bytes.byteLength + 3) & ~3,
+        size: Math.max(4, (bytes.byteLength + 3) & ~3),
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
       });
       this.device.queue.writeBuffer(buffer, 0, bytes);
@@ -31,6 +31,17 @@ class WebGPUModelLoader {
     const tensor = this.manifest.weights[name];
     if (!tensor) throw new Error(`Tensor ausente: ${name}`);
     return { buffer: this.buffers.get(name), shape: tensor.shape, layout: tensor.layout };
+  }
+
+  weightsFor(prefix) {
+    const names = Object.keys(this.manifest.weights)
+      .filter((name) => name.startsWith(prefix))
+      .sort((a, b) => {
+        const ai = Number(a.split(".")[1]);
+        const bi = Number(b.split(".")[1]);
+        return ai - bi;
+      });
+    return names.map((name) => this.tensor(name));
   }
 }
 
