@@ -42,8 +42,9 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
       this.resize = this.resize.bind(this);
       this.canvas = document.createElement("canvas");
       this.canvas.className = "vu-webgpu-canvas";
-      this.canvas.style.cssText = "position:absolute;z-index:2147483646;object-fit:contain;background:#000";
+      this.canvas.style.cssText = "position:absolute;z-index:2147483646;object-fit:contain;background:#000;pointer-events:none";
       this.running = false;
+      this.rendered = false;
       this.ready = this.initialize();
     }
 
@@ -82,9 +83,13 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
 
     async start() {
       await this.ready;
+      if (this.video.readyState < HTMLMediaElement.HAVE_METADATA) {
+        await new Promise((resolve) => {
+          this.video.addEventListener("loadedmetadata", resolve, { once: true });
+        });
+      }
       this.resize();
       (document.body || document.documentElement).append(this.canvas);
-      this.video.style.visibility = "hidden";
       this.running = true;
       this.frame();
       this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -95,13 +100,16 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
 
     frame() {
       if (!this.running) return;
-      if (this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
-        if (!this.texture || this.sourceWidth !== this.video.videoWidth || this.sourceHeight !== this.video.videoHeight) {
+      const width = this.video.videoWidth;
+      const height = this.video.videoHeight;
+      if (this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && width > 0 && height > 0) {
+        try {
+        if (!this.texture || this.sourceWidth !== width || this.sourceHeight !== height) {
           this.texture?.destroy();
-          this.sourceWidth = this.video.videoWidth;
-          this.sourceHeight = this.video.videoHeight;
+          this.sourceWidth = width;
+          this.sourceHeight = height;
           this.texture = this.device.createTexture({
-            size: [this.video.videoWidth, this.video.videoHeight],
+            size: [width, height],
             format: "rgba8unorm",
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
           });
@@ -116,7 +124,7 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
         this.device.queue.copyExternalImageToTexture(
           { source: this.video },
           { texture: this.texture },
-          [this.video.videoWidth, this.video.videoHeight],
+          [width, height],
         );
         const encoder = this.device.createCommandEncoder();
         const pass = encoder.beginRenderPass({
@@ -132,6 +140,14 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
         pass.draw(6);
         pass.end();
         this.device.queue.submit([encoder.finish()]);
+        if (!this.rendered) {
+          this.rendered = true;
+          this.video.style.visibility = "hidden";
+        }
+        } catch (error) {
+          this.canvas.dataset.error = error instanceof Error ? error.message : String(error);
+          this.video.style.visibility = "";
+        }
       }
       requestAnimationFrame(() => this.frame());
     }
