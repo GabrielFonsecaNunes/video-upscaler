@@ -5,7 +5,7 @@ struct VertexOutput {
   @location(0) uv: vec2f,
 };
 
-@group(0) @binding(0) var source: texture_2d<f32>;
+@group(0) @binding(0) var source: texture_external;
 @group(0) @binding(1) var filtering: sampler;
 
 @vertex
@@ -23,17 +23,8 @@ fn vertex(@builtin(vertex_index) index: u32) -> VertexOutput {
 
 @fragment
 fn fragment(input: VertexOutput) -> @location(0) vec4f {
-  let size = vec2f(textureDimensions(source));
-  let pixel = 1.0 / size;
   let center = textureSample(source, filtering, input.uv);
-  let blur = (
-    textureSample(source, filtering, input.uv + vec2f(pixel.x, 0.0)) +
-    textureSample(source, filtering, input.uv - vec2f(pixel.x, 0.0)) +
-    textureSample(source, filtering, input.uv + vec2f(0.0, pixel.y)) +
-    textureSample(source, filtering, input.uv - vec2f(0.0, pixel.y))
-  ) * 0.25;
-  let sharpened = center.rgb + (center.rgb - blur.rgb) * 0.18;
-  return vec4f(clamp(sharpened, vec3f(0.0), vec3f(1.0)), center.a);
+  return center;
 }
 `;
 
@@ -101,6 +92,7 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
         });
       }
       this.resize();
+      this.context.configure({ device: this.device, format: this.format, alphaMode: "opaque" });
       (document.body || document.documentElement).append(this.canvas);
       this.running = true;
       this.firstFrame = new Promise((resolve, reject) => {
@@ -122,50 +114,36 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
       const height = this.video.videoHeight;
       if (this.video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && width > 0 && height > 0) {
         try {
-        if (!this.texture || this.sourceWidth !== width || this.sourceHeight !== height) {
-          this.texture?.destroy();
-          this.sourceWidth = width;
-          this.sourceHeight = height;
-          this.texture = this.device.createTexture({
-            size: [width, height],
-            format: "rgba8unorm",
-            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
-          });
-          this.bindGroup = this.device.createBindGroup({
+          const external = this.device.importExternalTexture({ source: this.video });
+          const bindGroup = this.device.createBindGroup({
             layout: this.pipeline.getBindGroupLayout(0),
             entries: [
-              { binding: 0, resource: this.texture.createView() },
+              { binding: 0, resource: external },
               { binding: 1, resource: this.sampler },
             ],
           });
-        }
-        this.device.queue.copyExternalImageToTexture(
-          { source: this.video },
-          { texture: this.texture },
-          [width, height],
-        );
-        const encoder = this.device.createCommandEncoder();
-        const pass = encoder.beginRenderPass({
-          colorAttachments: [{
-            view: this.context.getCurrentTexture().createView(),
-            clearValue: { r: 0, g: 0, b: 0, a: 1 },
-            loadOp: "clear",
-            storeOp: "store",
-          }],
-        });
-        pass.setPipeline(this.pipeline);
-        pass.setBindGroup(0, this.bindGroup);
-        pass.draw(6);
-        pass.end();
-        this.device.queue.submit([encoder.finish()]);
-        if (!this.rendered) {
-          this.device.queue.onSubmittedWorkDone().then(() => {
-            if (!this.running || this.rendered) return;
-            this.rendered = true;
-            this.video.style.visibility = "hidden";
-            this.resolveFirstFrame?.();
+          const encoder = this.device.createCommandEncoder();
+          const pass = encoder.beginRenderPass({
+            colorAttachments: [{
+              view: this.context.getCurrentTexture().createView(),
+              clearValue: { r: 0, g: 0, b: 0, a: 1 },
+              loadOp: "clear",
+              storeOp: "store",
+            }],
           });
-        }
+          pass.setPipeline(this.pipeline);
+          pass.setBindGroup(0, bindGroup);
+          pass.draw(6);
+          pass.end();
+          this.device.queue.submit([encoder.finish()]);
+          if (!this.rendered) {
+            this.device.queue.onSubmittedWorkDone().then(() => {
+              if (!this.running || this.rendered) return;
+              this.rendered = true;
+              this.video.style.visibility = "hidden";
+              this.resolveFirstFrame?.();
+            });
+          }
         } catch (error) {
           this.canvas.dataset.error = error instanceof Error ? error.message : String(error);
           this.video.style.visibility = "";
