@@ -7,7 +7,6 @@ import argparse
 import json
 import os
 import platform
-import shlex
 import shutil
 import stat
 import sys
@@ -62,7 +61,9 @@ def main() -> int:
     HOST.chmod(HOST.stat().st_mode | stat.S_IXUSR)
     if platform.system() != "Windows":
         LAUNCHER.write_text(
-            f"#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(HOST))} \"$@\"\n"
+            f"#!{sys.executable}\n"
+            "import runpy\n"
+            f"runpy.run_path({str(HOST)!r}, run_name='__main__')\n"
         )
         LAUNCHER.chmod(0o755)
     if platform.system() == "Windows":
