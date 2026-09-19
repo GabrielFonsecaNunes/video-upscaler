@@ -43,7 +43,7 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
       this.resize = this.resize.bind(this);
       this.canvas = document.createElement("canvas");
       this.canvas.className = "vu-webgpu-canvas";
-      this.canvas.style.cssText = "position:absolute;z-index:2147483646;object-fit:contain;background:#000;pointer-events:none";
+      this.canvas.style.cssText = "position:fixed;z-index:2147483646;object-fit:contain;background:#000;pointer-events:none";
       this.running = false;
       this.rendered = false;
       this.ready = this.initialize();
@@ -87,8 +87,8 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
       const height = Math.max(1, Math.floor(this.video.videoHeight || rect.height));
       this.canvas.width = width * 2;
       this.canvas.height = height * 2;
-      this.canvas.style.top = `${window.scrollY + rect.top}px`;
-      this.canvas.style.left = `${window.scrollX + rect.left}px`;
+      this.canvas.style.top = `${rect.top}px`;
+      this.canvas.style.left = `${rect.left}px`;
       this.canvas.style.width = `${rect.width}px`;
       this.canvas.style.height = `${rect.height}px`;
     }
@@ -159,9 +159,12 @@ fn fragment(input: VertexOutput) -> @location(0) vec4f {
         pass.end();
         this.device.queue.submit([encoder.finish()]);
         if (!this.rendered) {
-          this.rendered = true;
-          this.video.style.visibility = "hidden";
-          this.resolveFirstFrame?.();
+          this.device.queue.onSubmittedWorkDone().then(() => {
+            if (!this.running || this.rendered) return;
+            this.rendered = true;
+            this.video.style.visibility = "hidden";
+            this.resolveFirstFrame?.();
+          });
         }
         } catch (error) {
           this.canvas.dataset.error = error instanceof Error ? error.message : String(error);
