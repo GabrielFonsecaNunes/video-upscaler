@@ -15,7 +15,7 @@ The `browser-extension/` folder is a Manifest V3 extension for Chrome, Edge, and
 
 The extension never sends frames to a paid web service. It uses the included `native-host/` companion to download the video only after the user clicks a button, then processes it on the same computer. Results are saved in `Videos/Video Upscaler`.
 
-On Apple Silicon, the companion automatically uses the MLX backend in `scripts/video_upscale_mlx.py`. This is the native Metal path and avoids Vulkan. It currently supports the economical 2× profile. Frames are decoded and encoded through FFmpeg pipes on demand, so the MLX path does not create a temporary PNG sequence.
+On Apple Silicon, the companion automatically uses ONNX Runtime with the Real-ESRGAN x4 model in `scripts/video_upscale_onnx.py`, using CoreML when available and CPU as fallback. The model is downloaded once to `tools/onnx-models/`. The 2× option runs the x4 model and downsamples its result; frames are decoded and encoded through FFmpeg pipes without a temporary PNG sequence.
 
 ## Hybrid streaming branch
 
@@ -58,6 +58,7 @@ On YouTube, the companion receives the regular page address rather than a short-
 - Python 3.10+
 - FFmpeg and FFprobe
 - `realesrgan-ncnn-vulkan` (or `realesrgan-ncnn-py`) with its `models` folder
+- `onnxruntime`, `onnx`, and `Pillow` for the Apple Silicon ONNX backend
 
 Place executables in the system PATH, or use this layout:
 

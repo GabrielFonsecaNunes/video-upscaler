@@ -21,6 +21,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[1]
 UPSCALE = ROOT / "scripts" / "video_upscale.py"
 MLX_UPSCALE = ROOT / "scripts" / "video_upscale_mlx.py"
+ONNX_UPSCALE = ROOT / "scripts" / "video_upscale_onnx.py"
 MLX_PYTHON = ROOT / ".apple-silicon-env" / "bin" / "python"
 OUTPUT = Path.home() / "Videos" / "Video Upscaler"
 STREAM_ENGINE = ROOT / "streaming-engine" / "video-upscaler-engine"
@@ -154,12 +155,18 @@ def download(message: dict, target: Path) -> Path:
         yt_dlp = find_executable("yt-dlp")
         if not yt_dlp:
             raise RuntimeError("yt-dlp não encontrado. Verifique a instalação local.")
-        subprocess.run(
-            [yt_dlp, "--no-playlist", "-f",
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]",
-             "--merge-output-format", "mp4", "-o", str(target), page],
-            check=True, stdout=sys.stderr,
-        )
+        limit_seconds = message.get("limitSeconds")
+        command = [
+            yt_dlp, "--no-playlist", "--concurrent-fragments", "8",
+            "--newline", "-f",
+            "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/"
+            "best[ext=mp4][height<=720]/best[ext=mp4]",
+            "--merge-output-format", "mp4", "-o", str(target),
+        ]
+        if limit_seconds:
+            command += ["--download-sections", f"*0-{float(limit_seconds):g}"]
+        command.append(page)
+        subprocess.run(command, check=True, stdout=sys.stderr)
         return target.with_suffix(".mp4")
     request = Request(url, headers={"User-Agent": "Mozilla/5.0", "Referer": page})
     with urlopen(request, timeout=60) as response, target.open("wb") as file:
@@ -201,6 +208,7 @@ def main() -> None:
     try:
         download(message, source)
         use_mlx = platform.system() == "Darwin" and platform.machine() == "arm64" and MLX_PYTHON.is_file()
+        use_onnx = use_mlx and ONNX_UPSCALE.is_file()
         model = message.get("model", "x2plus")
         if model not in MODELS:
             raise ValueError(f"Modelo inválido: {model}")
@@ -211,8 +219,14 @@ def main() -> None:
             "animevideo": "realesr-animevideov3",
             "general": "realesr-general-x4v3",
         }[model]
-        command = [str(MLX_PYTHON) if use_mlx else sys.executable, str(MLX_UPSCALE if use_mlx else UPSCALE), str(source), str(destination), "--scale", str(MODELS[model]), "--model", backend_model]
-        if use_mlx and model == "x2plus" and message.get("enableNativeEngine") is True:
+        if use_onnx:
+            command = [str(MLX_PYTHON), str(ONNX_UPSCALE), str(source), str(destination),
+                       "--scale", str(MODELS[model])]
+        else:
+            command = [str(MLX_PYTHON) if use_mlx else sys.executable,
+                       str(MLX_UPSCALE if use_mlx else UPSCALE), str(source), str(destination),
+                       "--scale", str(MODELS[model]), "--model", backend_model]
+        if use_mlx and not use_onnx and model == "x2plus" and message.get("enableNativeEngine") is True:
             stream_engine = ensure_stream_engine()
             if stream_engine is not None:
                 command += ["--stream-engine", str(stream_engine)]

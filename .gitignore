@@ -2,3 +2,4 @@ __pycache__/
 *.py[cod]
 .DS_Store
 native-host/video_upscaler_host_launcher
+tools/onnx-models/

@@ -87,10 +87,6 @@ async function replaceVideoSource(video, outputPath) {
     });
     video.pause();
     video.style.visibility = "hidden";
-    overlay.addEventListener("ended", () => {
-      video.style.visibility = "";
-      overlay.remove();
-    }, { once: true });
     return true;
   } catch (error) {
     overlay.remove();
