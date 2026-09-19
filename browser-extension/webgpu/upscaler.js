@@ -219,9 +219,9 @@ struct VertexOutput {
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
         });
         const params = this.uniform(new Uint32Array([width, height, inputChannels, outputChannels, i === convs.length - 1 ? 0 : 1]));
-        const slope = i === convs.length - 1
-          ? this.zeroSlope
-          : this.model.tensor(`acts.${i}.weight`).buffer;
+        const slope = i < convs.length - 1
+          ? this.model.tensor(`acts.${i}.weight`).buffer
+          : this.zeroSlope;
         if (!slope) this.zeroSlope = this.device.createBuffer({ size: 64 * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
         bind = this.device.createBindGroup({
           layout: this.convPipeline.getBindGroupLayout(0),
