@@ -9,6 +9,7 @@ The project provides one browser extension experience for the major browsers and
 - Local processing: video frames never leave the computer.
 - No accounts, subscriptions, or API billing.
 - A 10-second preview avoids spending time and electricity on an unsuitable full render.
+- For direct (non-YouTube) video URLs, previews are trimmed with FFmpeg directly from the remote stream whenever the source supports it, instead of downloading the entire file first; a full download is only used as a fallback or for the full-length render.
 - The default is 2x, which is substantially cheaper than 4x and is appropriate for most 360p–1080p source material.
 
 ## Browser extension

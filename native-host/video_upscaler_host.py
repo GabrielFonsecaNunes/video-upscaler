@@ -154,11 +154,11 @@ def unique_output(directory: Path, stem: str, suffix: str) -> Path:
 def download(message: dict, target: Path) -> Path:
     url = message["videoUrl"]
     page = message.get("pageUrl", "")
+    limit_seconds = message.get("limitSeconds")
     if "youtube.com" in page or "youtu.be" in page:
         yt_dlp = find_executable("yt-dlp")
         if not yt_dlp:
             raise RuntimeError("yt-dlp não encontrado. Verifique a instalação local.")
-        limit_seconds = message.get("limitSeconds")
         command = [
             yt_dlp, "--no-playlist", "--concurrent-fragments", "8",
             "--newline", "-f",
@@ -171,11 +171,58 @@ def download(message: dict, target: Path) -> Path:
         command.append(page)
         subprocess.run(command, check=True, stdout=sys.stderr)
         return target.with_suffix(".mp4")
+    if limit_seconds and download_preview_with_ffmpeg(url, page, float(limit_seconds), target):
+        return target
     request = Request(url, headers={"User-Agent": "Mozilla/5.0", "Referer": page})
     with urlopen(request, timeout=60) as response, target.open("wb") as file:
         while chunk := response.read(1024 * 1024):
             file.write(chunk)
     return target
+
+
+def download_preview_with_ffmpeg(url: str, page: str, limit_seconds: float, target: Path) -> bool:
+    """Trim a direct (non-YouTube) video source to a short preview without
+    downloading the full file first. FFmpeg stops reading the network stream
+    once it has enough packets for --limit-seconds, unlike urlopen() which
+    always reads the whole response body.
+
+    Some MP4s store their moov atom at the end of the file (no
+    "faststart"), which forces FFmpeg to read the whole stream before it can
+    even start demuxing — in that case FFmpeg still exits 0 but writes a
+    tiny/invalid file, so success is verified by probing the actual output
+    duration rather than trusting the return code alone.
+
+    Returns True on success; False means the caller should fall back to a
+    full download (older FFmpeg builds, servers without partial-read
+    support, or a moov-at-end / copy-incompatible container).
+    """
+    ffmpeg = find_executable("ffmpeg")
+    ffprobe = find_executable("ffprobe")
+    if not ffmpeg or not ffprobe:
+        return False
+    headers = "User-Agent: Mozilla/5.0\r\n"
+    if page:
+        headers += f"Referer: {page}\r\n"
+    base = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-headers", headers, "-i", url,
+            "-t", f"{limit_seconds:g}"]
+    for extra in (["-c", "copy"], []):
+        subprocess.run(base + extra + [str(target)], capture_output=True, text=True)
+        if target.is_file() and _probe_duration(ffprobe, target) > 0:
+            return True
+        target.unlink(missing_ok=True)
+    return False
+
+
+def _probe_duration(ffprobe: str, path: Path) -> float:
+    try:
+        result = subprocess.run(
+            [ffprobe, "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+            capture_output=True, text=True, timeout=15,
+        )
+        return float(result.stdout.strip())
+    except (subprocess.TimeoutExpired, ValueError):
+        return 0.0
 
 
 def ensure_stream_engine() -> Path | None:
