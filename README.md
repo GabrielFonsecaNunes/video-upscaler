@@ -1,6 +1,8 @@
 # Video Upscaler
 
-An offline Codex plugin for improving local videos on macOS, Windows, and Linux. It keeps the original file unchanged, preserves audio, and uses the free Real-ESRGAN NCNN engine instead of metered cloud services.
+An offline, universal video-upscaling plugin for macOS, Windows, and Linux. It is designed to work across desktop and mobile browsing experiences through the main modern browsers, while keeping the original file unchanged, preserving audio, and using the free Real-ESRGAN NCNN engine instead of metered cloud services.
+
+The project provides one browser extension experience for the major browsers and a portable local processing layer for different device types. Processing remains on the user's computer whenever the native host is available, so videos do not need to be uploaded to a third-party service.
 
 ## Why it is low-cost
 
@@ -11,7 +13,9 @@ An offline Codex plugin for improving local videos on macOS, Windows, and Linux.
 
 ## Browser extension
 
-The `browser-extension/` folder is a Manifest V3 extension for Chrome, Edge, and recent Firefox versions. It detects `<video>` elements, including the YouTube player, and displays **Prévia 2×** and **2× completo** directly above the video.
+The `browser-extension/` folder is a universal Manifest V3 extension for Google Chrome, Microsoft Edge, Mozilla Firefox, Brave, Opera, and other Chromium-based browsers. It detects `<video>` elements, including the YouTube player, and displays **Prévia 2×** and **2× completo** directly above the video.
+
+The extension is intended for laptops, desktops, and supported tablet or mobile browser environments. Chromium browsers share the same package, while Firefox uses its compatible Manifest V3 installation flow. Devices that do not support browser extensions can still use the local Python and command-line processing tools directly.
 
 The extension never sends frames to a paid web service. It uses the included `native-host/` companion to download the video only after the user clicks a button, then processes it on the same computer. Results are saved in `Videos/Video Upscaler`.
 
@@ -39,15 +43,16 @@ python3 streaming-engine/stream_frames.py /tmp/video-upscaler-engine \
 
 ### Install for development
 
-1. Chrome/Edge: open `chrome://extensions`, activate **Developer mode**, choose **Load unpacked**, and select `browser-extension/`.
+1. Chrome, Edge, Brave, Opera, and other Chromium browsers: open the browser's extensions page, activate **Developer mode**, choose **Load unpacked**, and select `browser-extension/`.
 2. Firefox: open `about:debugging#/runtime/this-firefox`, choose **Load Temporary Add-on**, and select `browser-extension/manifest.json`.
-3. Register the native host after loading the extension. In Chrome or Edge, copy its extension ID from the extensions page and run:
+3. On supported mobile browsers, install the extension through the browser's extension store or compatible add-on flow.
+4. Register the native host after loading the extension. In Chrome or Edge, copy its extension ID from the extensions page and run:
 
    ```sh
    python native-host/install_native_host.py --browser chrome --extension-id YOUR_EXTENSION_ID
    ```
 
-   Replace `chrome` with `edge` for Edge. For Firefox, run `python native-host/install_native_host.py --browser firefox`. On Windows, add the registry entry printed by the same command with `--print-windows-registry`.
+   Replace `chrome` with `edge`, `brave`, or `opera` as appropriate. For Firefox, run `python native-host/install_native_host.py --browser firefox`. On Windows, add the registry entry printed by the same command with `--print-windows-registry`.
 
 Native Messaging requires this browser-specific registration step so a web page can never run programs on the computer directly.
 
