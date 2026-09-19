@@ -23,6 +23,7 @@ MLX_UPSCALE = ROOT / "scripts" / "video_upscale_mlx.py"
 MLX_PYTHON = ROOT / ".apple-silicon-env" / "bin" / "python"
 OUTPUT = Path.home() / "Videos" / "Video Upscaler"
 STREAM_ENGINE = ROOT / "streaming-engine" / "video-upscaler-engine"
+MAX_MESSAGE_SIZE = 32 * 1024 * 1024
 
 class OutputHandler(SimpleHTTPRequestHandler):
     def end_headers(self) -> None:
@@ -71,8 +72,15 @@ def read_message() -> dict | None:
     raw_length = sys.stdin.buffer.read(4)
     if not raw_length:
         return None
+    if len(raw_length) != 4:
+        raise RuntimeError("Native Messaging header incompleto")
     length = struct.unpack("<I", raw_length)[0]
-    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
+    if length > MAX_MESSAGE_SIZE:
+        raise RuntimeError(f"Mensagem Native Messaging excede {MAX_MESSAGE_SIZE} bytes")
+    payload = sys.stdin.buffer.read(length)
+    if len(payload) != length:
+        raise RuntimeError("Mensagem Native Messaging incompleta")
+    return json.loads(payload.decode("utf-8"))
 
 
 def send_message(payload: dict) -> None:
@@ -157,4 +165,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        print(f"Native Host fatal error: {error}", file=sys.stderr, flush=True)
+        send_message({"error": str(error)})
