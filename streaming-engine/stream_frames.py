@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("engine", type=Path)
     parser.add_argument("--width", type=int, required=True)
     parser.add_argument("--height", type=int, required=True)
-    parser.add_argument("--frames", type=int, default=1)
+    parser.add_argument("--frames", type=int)
     parser.add_argument("--model", choices=("nearest", "x2plus"), default="nearest")
     parser.add_argument("--tile", type=int, default=256)
     return parser.parse_args()
@@ -45,8 +45,11 @@ def main() -> int:
     assert process.stdin is not None
     assert process.stdout is not None
     try:
-        for _ in range(args.frames):
+        frame_count = 0
+        while args.frames is None or frame_count < args.frames:
             frame = sys.stdin.buffer.read(frame_size)
+            if not frame:
+                break
             if len(frame) != frame_size:
                 raise RuntimeError(f"expected {frame_size} input bytes")
             process.stdin.write(struct.pack("<II", args.width, args.height) + frame)
@@ -62,19 +65,21 @@ def main() -> int:
                 array = np.frombuffer(output, dtype=np.uint8).reshape(
                     output_height, output_width, 3
                 ).astype(np.float32) / 255.0
-                enhanced = upscale_image(
-                    model,
-                    array,
-                    native_scale,
-                    tile_size=args.tile,
-                    pre_pad=0,
-                    dtype=mx.float16,
-                )
+                with contextlib.redirect_stdout(sys.stderr):
+                    enhanced = upscale_image(
+                        model,
+                        array,
+                        native_scale,
+                        tile_size=args.tile,
+                        pre_pad=0,
+                        dtype=mx.float16,
+                    )
                 enhanced_uint8 = np.clip(enhanced * 255, 0, 255).astype(np.uint8)
                 output_height, output_width = enhanced_uint8.shape[:2]
                 output = enhanced_uint8.tobytes()
             sys.stdout.buffer.write(output)
             sys.stdout.buffer.flush()
+            frame_count += 1
             expected_scale = 2
             if output_width != args.width * expected_scale or output_height != args.height * expected_scale:
                 raise RuntimeError(
