@@ -23,8 +23,7 @@ fn vertex(@builtin(vertex_index) index: u32) -> VertexOutput {
 
 @fragment
 fn fragment(input: VertexOutput) -> @location(0) vec4f {
-  let center = textureSample(source, filtering, input.uv);
-  return center;
+  return textureSampleBaseClampToEdge(source, filtering, input.uv);
 }
 `;
 
