@@ -77,7 +77,12 @@ def output_url(path: Path) -> str:
 
 
 def read_message() -> dict | None:
-    raw_length = sys.stdin.buffer.read(4)
+    raw_length = bytearray()
+    while len(raw_length) < 4:
+        chunk = sys.stdin.buffer.read(4 - len(raw_length))
+        if not chunk:
+            break
+        raw_length.extend(chunk)
     if not raw_length:
         return None
     if len(raw_length) != 4:
@@ -85,10 +90,15 @@ def read_message() -> dict | None:
     length = struct.unpack("<I", raw_length)[0]
     if length > MAX_MESSAGE_SIZE:
         raise RuntimeError(f"Mensagem Native Messaging excede {MAX_MESSAGE_SIZE} bytes")
-    payload = sys.stdin.buffer.read(length)
+    payload = bytearray()
+    while len(payload) < length:
+        chunk = sys.stdin.buffer.read(length - len(payload))
+        if not chunk:
+            break
+        payload.extend(chunk)
     if len(payload) != length:
         raise RuntimeError("Mensagem Native Messaging incompleta")
-    return json.loads(payload.decode("utf-8"))
+    return json.loads(bytes(payload).decode("utf-8"))
 
 
 def send_message(payload: dict) -> None:
