@@ -22,6 +22,10 @@ The extension never sends frames to a paid web service. It uses the included `na
 
 On Apple Silicon, the companion uses the converted CoreML model in `scripts/video_upscale_coreml.py` when `.coreml-env/` and the `.mlpackage` are available. It falls back to ONNX Runtime in `scripts/video_upscale_onnx.py` otherwise. The model is downloaded once to `tools/onnx-models/`. Frames are decoded and encoded through FFmpeg pipes without a temporary PNG sequence.
 
+### Optional fast mode (EfRLFN)
+
+Selecting **"EfRLFN x2 (turbo)"** in the model dropdown switches to `scripts/video_upscale_efrlfn.py`, which runs the vendored [EfRLFN](https://github.com/EvgeneyBogatyrev/EfRLFN) model (MIT License, ICLR 2026) via PyTorch/MPS. It processes each frame whole instead of tiling it, so it needs no overlap/stitch logic. Benchmarked on a 640×480 anime frame it is roughly **7x faster** than the Real-ESRGAN CoreML backend (~135ms vs. ~970ms per frame), at the cost of visibly softer, less detailed output — a real quality/speed trade-off, not a drop-in replacement. Pretrained weights are downloaded once to `tools/onnx-models/efrlfn-x{scale}.pt`.
+
 ### Experimental in-browser pipeline
 
 The extension also has a **"No navegador"** button that upscales entirely inside the tab, with no native host, FFmpeg, or Real-ESRGAN involved. It is implemented in `browser-extension/browser-pipeline.js`: it re-renders the `<video>` onto a canvas at 2×/4× (WebGPU when available, Canvas 2D otherwise) and records the result with `MediaRecorder`, reusing the original audio track.

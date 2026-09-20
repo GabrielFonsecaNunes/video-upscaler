@@ -23,12 +23,16 @@ UPSCALE = ROOT / "scripts" / "video_upscale.py"
 MLX_UPSCALE = ROOT / "scripts" / "video_upscale_mlx.py"
 ONNX_UPSCALE = ROOT / "scripts" / "video_upscale_onnx.py"
 COREML_UPSCALE = ROOT / "scripts" / "video_upscale_coreml.py"
+EFRLFN_UPSCALE = ROOT / "scripts" / "video_upscale_efrlfn.py"
 MLX_PYTHON = ROOT / ".apple-silicon-env" / "bin" / "python"
 COREML_PYTHON = ROOT / ".coreml-env" / "bin" / "python"
 COREML_MODEL = ROOT / "tools" / "onnx-models" / "real-esrgan-x4plus-128.mlpackage"
 OUTPUT = Path.home() / "Videos" / "Video Upscaler"
 STREAM_ENGINE = ROOT / "streaming-engine" / "video-upscaler-engine"
-MODELS = {"x2plus": 2, "x4plus": 4, "anime_6B": 4, "animevideo": 4, "general": 4}
+# "fast mode": ~7x faster than Real-ESRGAN CoreML (no tiling, ~487K params)
+# at the cost of softer/less detailed output. See scripts/video_upscale_efrlfn.py.
+EFRLFN_MODELS = {"efrlfn_x2": 2, "efrlfn_x4": 4}
+MODELS = {"x2plus": 2, "x4plus": 4, "anime_6B": 4, "animevideo": 4, "general": 4, **EFRLFN_MODELS}
 MAX_MESSAGE_SIZE = 32 * 1024 * 1024
 LOG_FILE = OUTPUT / "native-host.log"
 TOOL_DIRECTORIES = (
@@ -277,14 +281,20 @@ def main() -> None:
         model = message.get("model", "x2plus")
         if model not in MODELS:
             raise ValueError(f"Modelo inválido: {model}")
+        use_efrlfn = model in EFRLFN_MODELS and EFRLFN_UPSCALE.is_file() and (
+            COREML_PYTHON.is_file() or MLX_PYTHON.is_file())
         backend_model = model if use_mlx else {
             "x2plus": "realesrgan-x2plus",
             "x4plus": "realesrgan-x4plus",
             "anime_6B": "realesrgan-x4plus-anime",
             "animevideo": "realesr-animevideov3",
             "general": "realesr-general-x4v3",
-        }[model]
-        if use_coreml:
+        }.get(model)
+        if use_efrlfn:
+            efrlfn_python = COREML_PYTHON if COREML_PYTHON.is_file() else MLX_PYTHON
+            command = [str(efrlfn_python), str(EFRLFN_UPSCALE), str(source), str(destination),
+                       "--scale", str(MODELS[model])]
+        elif use_coreml:
             command = [str(COREML_PYTHON), str(COREML_UPSCALE), str(source), str(destination),
                        "--scale", str(MODELS[model])]
         elif use_onnx:
@@ -295,9 +305,9 @@ def main() -> None:
                        str(MLX_UPSCALE if use_mlx else UPSCALE), str(source), str(destination),
                        "--scale", str(MODELS[model]), "--model", backend_model]
         # streaming-engine/ only wires into the direct MLX invocation below
-        # (video_upscale_mlx.py); the CoreML and ONNX scripts don't accept
-        # --stream-engine, so this must stay mutually exclusive with both.
-        use_mlx_direct = use_mlx and not use_coreml and not use_onnx
+        # (video_upscale_mlx.py); the CoreML, ONNX and EfRLFN scripts don't
+        # accept --stream-engine, so this must stay mutually exclusive with them.
+        use_mlx_direct = use_mlx and not use_coreml and not use_onnx and not use_efrlfn
         if use_mlx_direct and model == "x2plus" and message.get("enableNativeEngine") is True:
             stream_engine = ensure_stream_engine()
             if stream_engine is not None:

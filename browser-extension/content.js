@@ -143,7 +143,7 @@ function attach(video) {
   attached.add(video);
   const control = document.createElement("div");
   control.className = "vu-action";
-  control.innerHTML = '<span>Melhorar vídeo</span><label>Modelo <select class="vu-model"><option value="x2plus">Real-ESRGAN x2 (rápido)</option><option value="animevideo">AnimeVideo x4</option><option value="general">General x4</option><option value="x4plus">Real-ESRGAN x4</option><option value="anime_6B">Anime x4 (qualidade)</option></select></label><button type="button" data-pipeline="native">Prévia</button><button type="button" data-pipeline="native">Processar</button><button type="button" data-pipeline="browser" title="Experimental: processa nesta aba, sem o componente local">No navegador</button>';
+  control.innerHTML = '<span>Melhorar vídeo</span><label>Modelo <select class="vu-model"><option value="x2plus">Real-ESRGAN x2 (rápido)</option><option value="animevideo">AnimeVideo x4</option><option value="general">General x4</option><option value="x4plus">Real-ESRGAN x4</option><option value="anime_6B">Anime x4 (qualidade)</option><option value="efrlfn_x2" title="~7x mais rápido, qualidade mais suave">EfRLFN x2 (turbo)</option></select></label><button type="button" data-pipeline="native">Prévia</button><button type="button" data-pipeline="native">Processar</button><button type="button" data-pipeline="browser" title="Experimental: processa nesta aba, sem o componente local">No navegador</button>';
   (document.body || document.documentElement).append(control);
 
   const update = () => place(control, video);
