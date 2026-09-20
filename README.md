@@ -24,7 +24,7 @@ On Apple Silicon, the companion uses the converted CoreML model in `scripts/vide
 
 ### Optional fast mode (EfRLFN)
 
-Selecting **"EfRLFN x2 (turbo)"** in the model dropdown switches to `scripts/video_upscale_efrlfn.py`, which runs the vendored [EfRLFN](https://github.com/EvgeneyBogatyrev/EfRLFN) model (MIT License, ICLR 2026) via PyTorch/MPS. It processes each frame whole instead of tiling it, so it needs no overlap/stitch logic. Benchmarked on a 640×480 anime frame it is roughly **7x faster** than the Real-ESRGAN CoreML backend (~135ms vs. ~970ms per frame), at the cost of visibly softer, less detailed output — a real quality/speed trade-off, not a drop-in replacement. Pretrained weights are downloaded once to `tools/onnx-models/efrlfn-x{scale}.pt`.
+Selecting **"EfRLFN x2 (turbo)"** or **"EfRLFN x4 (turbo)"** in the model dropdown switches to `scripts/video_upscale_efrlfn.py`, which runs the vendored [EfRLFN](https://github.com/EvgeneyBogatyrev/EfRLFN) model (MIT License, ICLR 2026) via PyTorch/MPS. It processes each frame whole instead of tiling it, so it needs no overlap/stitch logic. Benchmarked on a 640×480 anime frame: ~135ms/frame at 2x (vs. ~970ms for Real-ESRGAN CoreML, ~7x faster) and ~165ms/frame at 4x (vs. ~880ms, ~5x faster) — at the cost of visibly softer, less detailed output at both scales, a real quality/speed trade-off rather than a drop-in replacement. Pretrained weights are downloaded once to `tools/onnx-models/efrlfn-x{scale}.pt`.
 
 ### Experimental in-browser pipeline
 
