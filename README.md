@@ -22,11 +22,13 @@ The extension never sends frames to a paid web service. It uses the included `na
 
 On Apple Silicon, the companion uses the converted CoreML model in `scripts/video_upscale_coreml.py` when `.coreml-env/` and the `.mlpackage` are available. It falls back to ONNX Runtime in `scripts/video_upscale_onnx.py` otherwise. The model is downloaded once to `tools/onnx-models/`. Frames are decoded and encoded through FFmpeg pipes without a temporary PNG sequence.
 
-### Optional fast mode (EfRLFN, RLFN)
+### Optional fast mode (EfRLFN, RLFN, NanoVSR)
 
 Selecting **"EfRLFN x2 (turbo)"** or **"EfRLFN x4 (turbo)"** in the model dropdown switches to `scripts/video_upscale_efrlfn.py`, which runs the vendored [EfRLFN](https://github.com/EvgeneyBogatyrev/EfRLFN) model (MIT License, ICLR 2026) via PyTorch/MPS. It processes each frame whole instead of tiling it, so it needs no overlap/stitch logic. Benchmarked on a 640×480 anime frame: ~135ms/frame at 2x (vs. ~970ms for Real-ESRGAN CoreML, ~7x faster) and ~165ms/frame at 4x (vs. ~880ms, ~5x faster) — at the cost of visibly softer, less detailed output at both scales, a real quality/speed trade-off rather than a drop-in replacement. Pretrained weights are downloaded once to `tools/onnx-models/efrlfn-x{scale}.pt`.
 
 Selecting **"RLFN x2 (turbo nítido)"** or **"RLFN x4 (turbo nítido)"** switches to `scripts/video_upscale_rlfn.py`, which runs the vendored [RLFN](https://github.com/bytedance/RLFN) model (Apache License 2.0; 1st place, Runtime track, NTIRE 2022 Efficient SR Challenge), also via PyTorch/MPS on the whole frame. It runs at a similar speed to EfRLFN (~142ms/frame at 2x, ~145ms/frame at 4x on the same test frame — about as fast, ~6x faster than Real-ESRGAN CoreML) but produces noticeably sharper output in side-by-side crops, close to the Real-ESRGAN backend's detail level. It is the better fast-mode default when both speed and sharpness matter. Pretrained weights are downloaded once to `tools/onnx-models/rlfn-x{scale}.pth`.
+
+Selecting **"NanoVSR x4 (turbo temporal)"** switches to `scripts/video_upscale_nanovsr.py`, which runs the vendored [NanoVSR](https://github.com/filippawlicki/nanovsr) model (MIT License, ECCV 2026). Unlike EfRLFN/RLFN, NanoVSR is a genuine *video* super-resolution model: it processes 15-frame chunks with bidirectional recurrent propagation instead of upscaling each frame in isolation, so the FFmpeg pipe buffers frames into chunks rather than streaming one at a time. It was the fastest backend tested (~93ms/frame on the same 640×480 test frame, ~9x faster than Real-ESRGAN CoreML — even faster than EfRLFN/RLFN), with quality close to RLFN's in both a static crop test and a real 3-second clip with genuine motion. x4 only (the released checkpoint doesn't support x2). Pretrained weights (the 226k-parameter variant) are downloaded once to `tools/onnx-models/nanovsr-226k.pth`.
 
 ### Experimental in-browser pipeline
 
