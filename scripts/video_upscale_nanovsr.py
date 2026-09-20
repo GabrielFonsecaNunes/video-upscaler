@@ -27,6 +27,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from urllib.request import urlretrieve
 
@@ -52,10 +53,8 @@ def video_info(ffprobe: str, source: Path) -> tuple[int, int, str]:
     rate = stream["r_frame_rate"]
     return int(stream["width"]), int(stream["height"]), rate if rate != "0/0" else "30"
 
-
 def weights_path() -> Path:
     return MODEL_DIR / "nanovsr-226k.pth"
-
 
 def ensure_weights() -> Path:
     path = weights_path()
@@ -120,6 +119,20 @@ def main() -> int:
     width, height, rate = video_info(ffprobe, source)
     if args.preview_fps:
         rate = str(args.preview_fps)
+    if args.chunk_size < 1:
+        print("Error: chunk-size must be at least 1.", file=sys.stderr)
+        return 2
+    # Keep the temporal batch close to the tested 640x480x15 memory footprint.
+    # At larger resolutions, a fixed 15-frame batch can exhaust unified memory.
+    memory_budget_pixels = 640 * 480 * CHUNK_SIZE
+    chunk_size = min(args.chunk_size, max(1, memory_budget_pixels // (width * height)))
+    if chunk_size != args.chunk_size:
+        print(
+            f"Reducing NanoVSR chunk size from {args.chunk_size} to {chunk_size} "
+            f"for {width}x{height} input.",
+            file=sys.stderr,
+            flush=True,
+        )
     decode = [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(source)]
     if args.limit_seconds:
         decode += ["-t", str(args.limit_seconds)]
@@ -134,41 +147,50 @@ def main() -> int:
               "-shortest", str(destination)]
     frame_size = width * height * 3
     network, device = load_network()
-    decoder = subprocess.Popen(decode, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    encoder = subprocess.Popen(encode, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-    try:
-        number = 0
-        chunk: list[np.ndarray] = []
+    # Use a temporary file instead of PIPE: no reader is running while the
+    # model is processing a chunk, so a noisy FFmpeg can otherwise deadlock.
+    with tempfile.TemporaryFile() as ffmpeg_stderr:
+        decoder = subprocess.Popen(decode, stdout=subprocess.PIPE, stderr=ffmpeg_stderr)
+        encoder = subprocess.Popen(encode, stdin=subprocess.PIPE, stderr=ffmpeg_stderr)
+        try:
+            number = 0
+            chunk: list[np.ndarray] = []
 
-        def flush_chunk():
-            nonlocal number
-            if not chunk:
-                return
-            for output in upscale_chunk(network, device, chunk):
-                encoder.stdin.write(output)
-                number += 1
-                print(f"Frame {number}", flush=True)
-            chunk.clear()
+            def flush_chunk():
+                nonlocal number
+                if not chunk:
+                    return
+                for output in upscale_chunk(network, device, chunk):
+                    encoder.stdin.write(output)
+                    number += 1
+                    print(f"Frame {number}", flush=True)
+                chunk.clear()
 
-        while raw := decoder.stdout.read(frame_size):
-            if len(raw) != frame_size:
-                raise RuntimeError("FFmpeg returned an incomplete RGB frame")
-            image = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3)
-            chunk.append(image)
-            if len(chunk) == args.chunk_size:
-                flush_chunk()
-        flush_chunk()
-        decoder.wait()
-        if decoder.returncode:
-            raise subprocess.CalledProcessError(decoder.returncode, decode, stderr=decoder.stderr.read())
-        encoder.stdin.close()
-        encoder.wait()
-        if encoder.returncode:
-            raise subprocess.CalledProcessError(encoder.returncode, encode, stderr=encoder.stderr.read())
-    finally:
-        for process in (decoder, encoder):
-            if process.poll() is None:
-                process.kill()
+            while raw := decoder.stdout.read(frame_size):
+                if len(raw) != frame_size:
+                    raise RuntimeError("FFmpeg returned an incomplete RGB frame")
+                image = np.frombuffer(raw, dtype=np.uint8).reshape(height, width, 3)
+                chunk.append(image)
+                if len(chunk) == chunk_size:
+                    flush_chunk()
+            flush_chunk()
+            decoder.wait()
+            if decoder.returncode:
+                ffmpeg_stderr.seek(0)
+                raise subprocess.CalledProcessError(
+                    decoder.returncode, decode, stderr=ffmpeg_stderr.read().decode(errors="replace")
+                )
+            encoder.stdin.close()
+            encoder.wait()
+            if encoder.returncode:
+                ffmpeg_stderr.seek(0)
+                raise subprocess.CalledProcessError(
+                    encoder.returncode, encode, stderr=ffmpeg_stderr.read().decode(errors="replace")
+                )
+        finally:
+            for process in (decoder, encoder):
+                if process.poll() is None:
+                    process.kill()
     return 0
 
 
