@@ -195,6 +195,17 @@ def download(message: dict, target: Path) -> Path:
     return target
 
 
+def is_direct_media_url(url: str, page: str) -> bool:
+    """Only direct HTTP(S) media URLs can be passed to FFmpeg without staging."""
+    parsed = urlparse(url)
+    return (
+        parsed.scheme in {"http", "https"}
+        and parsed.netloc != ""
+        and "youtube.com" not in page
+        and "youtu.be" not in page
+    )
+
+
 def youtube_js_challenge_args() -> list[str]:
     """YouTube now requires solving a JS "signature/n" challenge before it
     hands out a working videoplayback URL. yt-dlp needs a JS runtime (node,
@@ -284,7 +295,6 @@ def main() -> None:
     suffix = "preview" if message.get("limitSeconds") else "2x"
     destination = unique_output(OUTPUT, stem, suffix)
     try:
-        download(message, source)
         use_mlx = platform.system() == "Darwin" and platform.machine() == "arm64" and MLX_PYTHON.is_file()
         use_coreml = use_mlx and COREML_PYTHON.is_file() and COREML_UPSCALE.is_file() and COREML_MODEL.is_dir()
         use_onnx = use_mlx and ONNX_UPSCALE.is_file() and not use_coreml
@@ -297,6 +307,11 @@ def main() -> None:
             COREML_PYTHON.is_file() or MLX_PYTHON.is_file())
         use_nanovsr = model in NANOVSR_MODELS and NANOVSR_UPSCALE.is_file() and (
             COREML_PYTHON.is_file() or MLX_PYTHON.is_file())
+        if use_nanovsr and is_direct_media_url(message["videoUrl"], message.get("pageUrl", "")):
+            input_source: Path | str = message["videoUrl"]
+            log_event(f"NanoVSR streaming direct source={input_source!r}")
+        else:
+            input_source = download(message, source)
         backend_model = model if use_mlx else {
             "x2plus": "realesrgan-x2plus",
             "x4plus": "realesrgan-x4plus",
@@ -306,25 +321,25 @@ def main() -> None:
         }.get(model)
         if use_efrlfn:
             efrlfn_python = COREML_PYTHON if COREML_PYTHON.is_file() else MLX_PYTHON
-            command = [str(efrlfn_python), str(EFRLFN_UPSCALE), str(source), str(destination),
+            command = [str(efrlfn_python), str(EFRLFN_UPSCALE), str(input_source), str(destination),
                        "--scale", str(MODELS[model])]
         elif use_rlfn:
             rlfn_python = COREML_PYTHON if COREML_PYTHON.is_file() else MLX_PYTHON
-            command = [str(rlfn_python), str(RLFN_UPSCALE), str(source), str(destination),
+            command = [str(rlfn_python), str(RLFN_UPSCALE), str(input_source), str(destination),
                        "--scale", str(MODELS[model])]
         elif use_nanovsr:
             nanovsr_python = COREML_PYTHON if COREML_PYTHON.is_file() else MLX_PYTHON
-            command = [str(nanovsr_python), str(NANOVSR_UPSCALE), str(source), str(destination),
+            command = [str(nanovsr_python), str(NANOVSR_UPSCALE), str(input_source), str(destination),
                        "--scale", str(MODELS[model])]
         elif use_coreml:
-            command = [str(COREML_PYTHON), str(COREML_UPSCALE), str(source), str(destination),
+            command = [str(COREML_PYTHON), str(COREML_UPSCALE), str(input_source), str(destination),
                        "--scale", str(MODELS[model])]
         elif use_onnx:
-            command = [str(MLX_PYTHON), str(ONNX_UPSCALE), str(source), str(destination),
+            command = [str(MLX_PYTHON), str(ONNX_UPSCALE), str(input_source), str(destination),
                        "--scale", str(MODELS[model])]
         else:
             command = [str(MLX_PYTHON) if use_mlx else sys.executable,
-                       str(MLX_UPSCALE if use_mlx else UPSCALE), str(source), str(destination),
+                       str(MLX_UPSCALE if use_mlx else UPSCALE), str(input_source), str(destination),
                        "--scale", str(MODELS[model]), "--model", backend_model]
         # streaming-engine/ only wires into the direct MLX invocation below
         # (video_upscale_mlx.py); the CoreML, ONNX, EfRLFN, RLFN and NanoVSR

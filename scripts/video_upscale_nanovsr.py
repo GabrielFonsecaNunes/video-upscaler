@@ -30,6 +30,7 @@ import sys
 import tempfile
 from pathlib import Path
 from urllib.request import urlretrieve
+from urllib.parse import urlparse
 
 import numpy as np
 import torch
@@ -43,10 +44,10 @@ WEIGHTS_URL = "https://github.com/filippawlicki/nanovsr/releases/download/v1.0/n
 CHUNK_SIZE = 15
 
 
-def video_info(ffprobe: str, source: Path) -> tuple[int, int, str]:
+def video_info(ffprobe: str, source: str) -> tuple[int, int, str]:
     result = subprocess.run(
         [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries",
-         "stream=width,height,r_frame_rate", "-of", "json", str(source)],
+         "stream=width,height,r_frame_rate", "-of", "json", source],
         capture_output=True, check=True, text=True,
     )
     stream = json.loads(result.stdout)["streams"][0]
@@ -91,7 +92,8 @@ def upscale_chunk(network: torch.nn.Module, device: str, frames: list[np.ndarray
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("input", type=Path, nargs="?")
+    parser.add_argument("input", nargs="?",
+                        help="Local video path or direct HTTP(S) media URL")
     parser.add_argument("output", type=Path, nargs="?")
     parser.add_argument("--scale", type=int, choices=(4,), default=4)
     parser.add_argument("--limit-seconds", type=float)
@@ -112,9 +114,13 @@ def main() -> int:
     if not args.input or not args.output or not ffmpeg or not ffprobe:
         print("Error: input/output, FFmpeg and FFprobe are required.", file=sys.stderr)
         return 2
-    source, destination = args.input.resolve(), args.output.resolve()
-    if not source.is_file() or source == destination or destination.exists():
-        print("Error: source must exist and output must be new and different.", file=sys.stderr)
+    destination = args.output.resolve()
+    source_is_url = urlparse(args.input).scheme in {"http", "https"}
+    source = args.input if source_is_url else str(Path(args.input).expanduser().resolve())
+    if ((not source_is_url and not Path(source).is_file())
+            or source == str(destination) or destination.exists()):
+        print("Error: source must exist (or be an HTTP(S) URL) and output must be new and different.",
+              file=sys.stderr)
         return 2
     width, height, rate = video_info(ffprobe, source)
     if args.preview_fps:
@@ -133,7 +139,7 @@ def main() -> int:
             file=sys.stderr,
             flush=True,
         )
-    decode = [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", str(source)]
+    decode = [ffmpeg, "-hide_banner", "-loglevel", "error", "-i", source]
     if args.limit_seconds:
         decode += ["-t", str(args.limit_seconds)]
     if args.preview_fps:
@@ -147,11 +153,12 @@ def main() -> int:
               "-shortest", str(destination)]
     frame_size = width * height * 3
     network, device = load_network()
-    # Use a temporary file instead of PIPE: no reader is running while the
+    # Use temporary files instead of PIPE: no reader is running while the
     # model is processing a chunk, so a noisy FFmpeg can otherwise deadlock.
-    with tempfile.TemporaryFile() as ffmpeg_stderr:
-        decoder = subprocess.Popen(decode, stdout=subprocess.PIPE, stderr=ffmpeg_stderr)
-        encoder = subprocess.Popen(encode, stdin=subprocess.PIPE, stderr=ffmpeg_stderr)
+    # Keep each process separate so failures report the relevant diagnostics.
+    with tempfile.TemporaryFile() as decoder_stderr, tempfile.TemporaryFile() as encoder_stderr:
+        decoder = subprocess.Popen(decode, stdout=subprocess.PIPE, stderr=decoder_stderr)
+        encoder = subprocess.Popen(encode, stdin=subprocess.PIPE, stderr=encoder_stderr)
         try:
             number = 0
             chunk: list[np.ndarray] = []
@@ -176,16 +183,16 @@ def main() -> int:
             flush_chunk()
             decoder.wait()
             if decoder.returncode:
-                ffmpeg_stderr.seek(0)
+                decoder_stderr.seek(0)
                 raise subprocess.CalledProcessError(
-                    decoder.returncode, decode, stderr=ffmpeg_stderr.read().decode(errors="replace")
+                    decoder.returncode, decode, stderr=decoder_stderr.read().decode(errors="replace")
                 )
             encoder.stdin.close()
             encoder.wait()
             if encoder.returncode:
-                ffmpeg_stderr.seek(0)
+                encoder_stderr.seek(0)
                 raise subprocess.CalledProcessError(
-                    encoder.returncode, encode, stderr=ffmpeg_stderr.read().decode(errors="replace")
+                    encoder.returncode, encode, stderr=encoder_stderr.read().decode(errors="replace")
                 )
         finally:
             for process in (decoder, encoder):
